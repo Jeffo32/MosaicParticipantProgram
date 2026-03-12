@@ -1,0 +1,356 @@
+import { useState, useMemo } from "react";
+
+const ACTIVITIES = [
+  { id: 1, emoji: "🍳", name: "Lifestyle Cooking", days: [2, 4], time: "10:00am", category: "Capacity Building", color: "#E8913A" },
+  { id: 2, emoji: "🎣", name: "Cast a Line", days: [3], time: "9:00am", category: "Community Participation", color: "#4A90D9" },
+  { id: 3, emoji: "🎨", name: "Art Therapy", days: [1, 5], time: "1:00pm", category: "Creative Expression", color: "#9B59B6" },
+  { id: 4, emoji: "🥊", name: "Boxercise", days: [1, 3, 5], time: "9:00am", category: "Fitness & Wellbeing", color: "#C0392B" },
+  { id: 5, emoji: "💆", name: "Beauty Therapy", days: [5], time: "11:00am", category: "Self-Care", color: "#E91E8C" },
+  { id: 6, emoji: "🌿", name: "Ancient Skills", days: [4], time: "2:00pm", category: "Cultural Connection", color: "#27AE60" },
+  { id: 7, emoji: "🔨", name: "Odd Jobs", days: [2], time: "11:00am", category: "Life Skills", color: "#F39C12" },
+];
+
+const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri"];
+const DAY_FULL = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+
+function getWeekDates(offset) {
+  const now = new Date();
+  const day = now.getDay();
+  const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+  const mon = new Date(now);
+  mon.setDate(diff + offset * 7);
+  return Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(mon);
+    d.setDate(mon.getDate() + i);
+    return d;
+  });
+}
+
+function fmt(d) {
+  return d.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+}
+
+const LOGO_B64 = "iVBORw0KGgoAAAANSUhEUgAAAZAAAADFCAYAAAB6i6Q8AAAACXBIWXMAAC4jAAAuIwF4pT92AACfXElEQVR4nOx9dZxc1d3+c23cfX037iFBEkIgAYJDKVqKFiktaYu9LdK+VPhRKKVvsSClWKG4NBBoAqTBQkLc3XazWR13u/L7Y+ZM7k5mdmeTtYR5+jldsnvlnHvP/bpQkiShjDLKKKOMMnoLerAnUEYZZZRRxpEJ6ne/+x0DQBjsiRQDRVGQJAkURfXLtUVRRDSZBE0BoCjQFA0lx0FB0/DE44ikkgjxAsLxNCZZTNCoFQhEYwBFQatQIp5OoCkeg1KhhkEQwTEMNCoFIokk1CwLCYBGqQQNoJCuR1MUUjyPRCoNlYIDyzAIJ5II8SloOQ6iICCZEpGgaaSFJDQMhRqdCYF4HCxDgWNZrPYEkYCE4WoWak4Bs1IFdyIBs1IJSZSQFgVoWQ4UTYFhGBypWmc0GoXVasU999wz2FMpo4wyALCiKLIYwgyEgGGYwZ5CGYMMhUKBQCCAXbt2YcSIEYM9nTLK+M6DTafTHIDkYE+kEIiGwLIsWJY9YiXnMvoGKpUKwWAQjz32GG677TaMHDlysKcESZIQDAbhdrvBcRwAQBRE2B126PX6AZtHKpVCe3s7eJ4HcEBzdzgc0Ol0AzaPow2dnZ0IhUI5zV2SJNjtdhgMhsGe2pAAS1HUkKXKxHTFsuxgT6WMIQBBEGA0GiGKIh577DHcfvvtOSayY8cOLFmypOQPOx6PY9iwYTjppJMOaS5btmzBqlWrsHv3bkQiEfj9/hyBYVkWVosVVpsVDQ0NmDFjBqqqqg7pPt0hkUjgm2++wfr16+Hz+eD1ehGPxxGLxaBUKqHVamE2mWG2mDF69GicfPLJsFgsfTqHTz75BB0dHdBoND0em0qlwLIsvve974GqqlKvu9TmsCwL6LFTKAAAAAElFkJggg==";
+
+function MosaicLogo({ size = 220, dark = false }) {
+  return (
+    <img
+      src={`data:image/png;base64,${LOGO_B64}`}
+      style={{
+        width: size,
+        filter: dark ? "brightness(0) invert(1)" : "none",
+        display: "block",
+      }}
+      alt="Mosaic Elite Health"
+    />
+  );
+}
+
+function Splash({ onStart }) {
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "#fff",
+      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+      padding: "32px 28px", textAlign: "center", color: "#1a1a1a"
+    }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+        * { font-family: 'Inter', system-ui, sans-serif; }
+      `}</style>
+
+      <MosaicLogo size={260} dark={false} />
+
+      <div style={{ marginBottom: 40 }} />
+
+      <h1 style={{ fontSize: 30, fontWeight: 800, margin: "0 0 10px", lineHeight: 1.2, color: "#1a1a1a" }}>
+        Hey Trey! 👋
+      </h1>
+      <p style={{ fontSize: 16, color: "#666", margin: "0 0 48px", whiteSpace: "nowrap" }}>
+        Ready to pick your activities for the week?
+      </p>
+
+      <button
+        onClick={onStart}
+        style={{
+          background: "#E53935",
+          color: "#fff", border: "none",
+          borderRadius: 22, padding: "18px 56px",
+          fontSize: 20, fontWeight: 800, cursor: "pointer",
+          boxShadow: "0 8px 28px rgba(229,57,53,0.35)",
+          letterSpacing: 0.5,
+        }}
+      >
+        Let's Go 🙌
+      </button>
+    </div>
+  );
+}
+
+export default function App() {
+  const [started, setStarted] = useState(false);
+  const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedDay, setSelectedDay] = useState(null);
+  const [booked, setBooked] = useState({});
+  const [toast, setToast] = useState(null);
+  const [alert, setAlert] = useState(null);
+  const [star, setStar] = useState(null); // { id, x, y }
+
+  const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
+  const weekLabel = `${fmt(weekDates[0])} – ${fmt(weekDates[4])}`;
+  const dayBookings = (d) => booked[d] || [];
+
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+  const showAlert = (msg) => { setAlert(msg); setTimeout(() => setAlert(null), 3000); };
+
+  const showStar = (el) => {
+    const id = Date.now();
+    const rect = el.getBoundingClientRect();
+    setStar({ id, x: rect.left + rect.width / 2, y: rect.top });
+    setTimeout(() => setStar(null), 1100);
+  };
+
+  const addActivity = (actId, dayIdx, el) => {
+    const existing = dayBookings(dayIdx);
+    if (existing.includes(actId)) return;
+    if (existing.length >= 2) { showAlert("This day is full! Try another day 😊"); return; }
+    setBooked(prev => ({ ...prev, [dayIdx]: [...(prev[dayIdx] || []), actId] }));
+    showStar(el);
+  };
+
+  const removeActivity = (actId, dayIdx) => {
+    setBooked(prev => ({ ...prev, [dayIdx]: (prev[dayIdx] || []).filter(id => id !== actId) }));
+  };
+
+  const totalSessions = Object.values(booked).flat().length;
+
+  const availableForDay = useMemo(() =>
+    selectedDay ? ACTIVITIES.filter(a => a.days.includes(selectedDay)) : [],
+    [selectedDay]
+  );
+
+  if (!started) return <Splash onStart={() => setStarted(true)} />;
+
+  return (
+    <div style={{ fontFamily: "'Inter', system-ui, sans-serif", background: "#F7F5F2", minHeight: "100vh", color: "#1a1a1a" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap');
+        * { font-family: 'Inter', system-ui, sans-serif; }
+        @keyframes starMain {
+          0%   { opacity: 0; transform: translate(-50%, 0px) scale(0.3) rotate(-10deg); }
+          25%  { opacity: 1; transform: translate(-50%, -30px) scale(1.2) rotate(6deg); }
+          60%  { opacity: 1; transform: translate(-50%, -60px) scale(1) rotate(-3deg); }
+          100% { opacity: 0; transform: translate(-50%, -110px) scale(0.7) rotate(8deg); }
+        }
+        @keyframes starLeft {
+          0%   { opacity: 0; transform: translate(0px, 0px) scale(0.2) rotate(0deg); }
+          30%  { opacity: 1; transform: translate(-22px, -25px) scale(1) rotate(-15deg); }
+          70%  { opacity: 0.8; transform: translate(-38px, -65px) scale(0.8) rotate(-25deg); }
+          100% { opacity: 0; transform: translate(-50px, -105px) scale(0.4) rotate(-35deg); }
+        }
+        @keyframes starRight {
+          0%   { opacity: 0; transform: translate(0px, 0px) scale(0.2) rotate(0deg); }
+          35%  { opacity: 1; transform: translate(20px, -18px) scale(1) rotate(12deg); }
+          70%  { opacity: 0.8; transform: translate(34px, -58px) scale(0.8) rotate(22deg); }
+          100% { opacity: 0; transform: translate(44px, -100px) scale(0.4) rotate(35deg); }
+        }
+      `}</style>
+
+      {/* Star reward popup */}
+      {star && (
+        <div style={{ position: "fixed", top: 0, left: 0, width: "100%", height: "100%", pointerEvents: "none", zIndex: 200 }}>
+          {/* Main star */}
+          <div style={{
+            position: "absolute", left: star.x, top: star.y,
+            fontSize: 48, lineHeight: 1,
+            animation: "starMain 1.05s cubic-bezier(0.22,1,0.36,1) forwards",
+            filter: "drop-shadow(0 2px 10px rgba(229,57,53,0.5))",
+          }}>⭐</div>
+          {/* Left small star */}
+          <div style={{
+            position: "absolute", left: star.x, top: star.y,
+            fontSize: 24, lineHeight: 1,
+            animation: "starLeft 1.05s cubic-bezier(0.22,1,0.36,1) forwards",
+            animationDelay: "60ms",
+            filter: "drop-shadow(0 2px 6px rgba(229,57,53,0.3))",
+          }}>⭐</div>
+          {/* Right small star */}
+          <div style={{
+            position: "absolute", left: star.x, top: star.y,
+            fontSize: 22, lineHeight: 1,
+            animation: "starRight 1.05s cubic-bezier(0.22,1,0.36,1) forwards",
+            animationDelay: "30ms",
+            filter: "drop-shadow(0 2px 6px rgba(229,57,53,0.3))",
+          }}>⭐</div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", borderRadius: 18, padding: "14px 28px", zIndex: 100, boxShadow: "0 4px 24px rgba(0,0,0,0.25)", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap" }}>
+          {toast}
+        </div>
+      )}
+      {alert && (
+        <div style={{ position: "fixed", top: 80, left: "50%", transform: "translateX(-50%)", background: "#fff3f3", color: "#b71c1c", border: "1.5px solid #E53935", borderRadius: 16, padding: "12px 22px", zIndex: 100, boxShadow: "0 4px 16px rgba(0,0,0,0.1)", fontSize: 14, fontWeight: 600, maxWidth: 300, textAlign: "center" }}>
+          ⚠️ {alert}
+        </div>
+      )}
+
+      {/* Header */}
+      <div style={{ background: "#1a1a1a", padding: "18px 20px 16px", color: "#fff" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+          <MosaicLogo size={160} dark={true} />
+
+        </div>
+        {/* Week Nav */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.08)", borderRadius: 14, padding: "10px 16px" }}>
+          <button onClick={() => { setWeekOffset(w => w - 1); setSelectedDay(null); }} style={{ background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", padding: "0 4px" }}>‹</button>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ fontSize: 11, opacity: 0.6, marginBottom: 2 }}>Week of</div>
+            <div style={{ fontWeight: 700, fontSize: 15 }}>{weekLabel}</div>
+          </div>
+          <button onClick={() => { setWeekOffset(w => w + 1); setSelectedDay(null); }} style={{ background: "none", border: "none", color: "#fff", fontSize: 22, cursor: "pointer", padding: "0 4px" }}>›</button>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 14px", maxWidth: 500, margin: "0 auto" }}>
+
+        {/* Tap prompt */}
+        {!selectedDay && (
+          <div style={{ textAlign: "center", padding: "14px 10px 10px", color: "#555", fontSize: 15, fontWeight: 600 }}>
+            <span className="tap-animate">👇</span>{" "}
+            <span className="tap-animate" style={{ color: "#E53935" }}>Tap</span>{" "}
+            a day to see what's on
+          </div>
+        )}
+
+        {/* Calendar Grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 20 }}>
+          {[1, 2, 3, 4, 5].map(d => {
+            const date = weekDates[d - 1];
+            const bookingsForDay = dayBookings(d);
+            const isSelected = selectedDay === d;
+            return (
+              <div
+                key={d}
+                onClick={() => setSelectedDay(isSelected ? null : d)}
+                style={{
+                  background: isSelected ? "#fff" : "#fff",
+                  border: isSelected ? "2.5px solid #E53935" : "2px solid #eee",
+                  borderRadius: 16, padding: "10px 6px", cursor: "pointer",
+                  boxShadow: isSelected ? "0 4px 16px rgba(229,57,53,0.18)" : "0 2px 8px rgba(0,0,0,0.06)",
+                  transition: "all 0.2s", minHeight: 110,
+                }}
+              >
+                <div style={{ textAlign: "center", marginBottom: 8 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: isSelected ? "#E53935" : "#aaa", textTransform: "uppercase" }}>{DAY_NAMES[d - 1]}</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a1a" }}>{date.getDate()}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {bookingsForDay.map(actId => {
+                    const act = ACTIVITIES.find(a => a.id === actId);
+                    return (
+                      <div key={actId} style={{ background: act.color + "22", border: `1px solid ${act.color}66`, borderRadius: 8, padding: "4px 5px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ fontSize: 14 }}>{act.emoji}</span>
+                        <button onClick={e => { e.stopPropagation(); removeActivity(actId, d); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#bbb", padding: 0 }}>✕</button>
+                      </div>
+                    );
+                  })}
+                  {[...Array(Math.max(0, 2 - bookingsForDay.length))].map((_, i) => (
+                    <div key={i} style={{ border: "1.5px dashed #ddd", borderRadius: 8, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <span style={{ fontSize: 10, color: "#ccc" }}>+</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Activity Drawer */}
+        {selectedDay && (
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#1a1a1a" }}>
+                {DAY_FULL[selectedDay - 1]}
+              </h2>
+              <button onClick={() => setSelectedDay(null)} style={{ background: "#f0f0f0", border: "none", fontSize: 12, color: "#666", cursor: "pointer", fontWeight: 700, borderRadius: 10, padding: "6px 12px" }}>
+                Close ✕
+              </button>
+            </div>
+
+            {availableForDay.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 20px", color: "#aaa", fontSize: 15 }}>
+                😴 Nothing on this day
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
+                {availableForDay.map(act => {
+                  const alreadyBooked = dayBookings(selectedDay).includes(act.id);
+                  return (
+                    <div key={act.id} style={{
+                      background: "#fff", borderRadius: 18, padding: "14px 16px",
+                      boxShadow: "0 2px 10px rgba(0,0,0,0.07)",
+                      border: alreadyBooked ? `2.5px solid ${act.color}` : "2.5px solid transparent",
+                      display: "flex", alignItems: "center", gap: 14,
+                      transition: "all 0.2s",
+                    }}>
+                      <div style={{ width: 52, height: 52, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>
+                        {act.emoji}
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 700, fontSize: 15 }}>{act.name}</div>
+                        <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>{act.time}</div>
+                        <span style={{ background: act.color + "20", color: act.color, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, marginTop: 5, display: "inline-block" }}>{act.category}</span>
+                      </div>
+                      <button
+                        onClick={(e) => addActivity(act.id, selectedDay, e.currentTarget)}
+                        disabled={alreadyBooked}
+                        style={{
+                          background: alreadyBooked ? "#f5f5f5" : "#E53935",
+                          color: alreadyBooked ? "#888" : "#fff",
+                          border: "none", borderRadius: 14,
+                          padding: "10px 16px", fontWeight: 700, fontSize: 14,
+                          cursor: alreadyBooked ? "default" : "pointer",
+                          flexShrink: 0, transition: "background 0.2s",
+                          minWidth: 72,
+                        }}
+                      >
+                        {alreadyBooked ? "✓ Added" : "+ Add"}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Save CTA */}
+        {!selectedDay && (
+          <button
+            onClick={() => totalSessions > 0 && showToast("Your program has been saved! We'll see you soon 🎉")}
+            style={{
+              width: "100%",
+              background: totalSessions > 0 ? "#E53935" : "#ebebeb",
+              color: totalSessions > 0 ? "#fff" : "#aaa",
+              border: "none", borderRadius: 18, padding: "18px",
+              fontSize: 17, fontWeight: 800,
+              cursor: totalSessions > 0 ? "pointer" : "not-allowed",
+              marginTop: 4, marginBottom: 12,
+              boxShadow: totalSessions > 0 ? "0 4px 20px rgba(229,57,53,0.3)" : "none",
+              transition: "all 0.2s",
+            }}
+          >
+            {totalSessions > 0
+              ? `Save My Week ✨  (${totalSessions} session${totalSessions !== 1 ? "s" : ""})`
+              : "What do you want to do this week?"}
+          </button>
+        )}
+
+        <div style={{ marginBottom: 32 }} />
+      </div>
+    </div>
+  );
+}
