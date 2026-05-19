@@ -150,7 +150,14 @@
     const safeParse = (s, fb) => { try { return JSON.parse(s) ?? fb; } catch { return fb; } };
     const loadBookings = () => safeParse(localStorage.getItem(STORAGE_BOOKINGS), {});
     const saveBookings = (b) => { try { localStorage.setItem(STORAGE_BOOKINGS, JSON.stringify(b)); } catch {} };
-    const loadProfile  = () => safeParse(localStorage.getItem(STORAGE_PROFILE), { dislikes: "", allergies: "", regulators: "", background: "" });
+    const loadProfile  = () => safeParse(localStorage.getItem(STORAGE_PROFILE), {
+      name: "", date: "",
+      likes: {}, favoriteLikes: [],
+      strengths: {}, favoriteStrengths: [],
+      skills: {}, favoriteSkills: [],
+      wellbeing: {},
+      otherHobbies: "", otherStrengths: "", otherSkills: ""
+    });
     const saveProfile  = (p) => { try { localStorage.setItem(STORAGE_PROFILE, JSON.stringify(p)); } catch {} };
     const loadRequests = () => safeParse(localStorage.getItem(STORAGE_REQUESTS), []);
     const saveRequests = (r) => { try { localStorage.setItem(STORAGE_REQUESTS, JSON.stringify(r)); } catch {} };
@@ -281,252 +288,265 @@
     }
 
     // ============================================================
-    // ABOUT ME (feature 03 — stub form)
-    // TODO(owner): replace fields with the structure from the Google Drive template.
+    // ABOUT ME — Mosaic Elite Health official form
+    // 4 sections: Likes & Dislikes, Personal Strengths (sentences),
+    //             I'm Good At (skills), Personal Wellbeing (1–5 scale)
     // ============================================================
-    // About Me fields with prompts (TTS) and presets (chip suggestions)
-    const ABOUT_FIELDS = [
-      {
-        key: "dislikes",
-        label: "What I don't like",
-        placeholder: "Foods, sounds, situations...",
-        prompt: "What don't you like? It can be foods, sounds, places, or anything that bothers you.",
-        presets: ["Loud noises", "Big crowds", "Spicy food", "Cold weather", "Bright lights", "Surprises", "Being rushed"]
-      },
-      {
-        key: "allergies",
-        label: "Allergies & reactions",
-        placeholder: "What you're allergic to and what happens",
-        prompt: "Do you have any allergies? What are you allergic to, and what happens when you have a reaction?",
-        presets: ["None", "Peanuts", "Dairy", "Eggs", "Bee stings", "Penicillin", "Shellfish", "Pollen"]
-      },
-      {
-        key: "regulators",
-        label: "What helps me feel calm",
-        placeholder: "Music, walks, quiet rooms...",
-        prompt: "When you feel upset or overwhelmed, what helps you feel calm again?",
-        presets: ["Music", "Going for a walk", "Quiet time", "Hot shower", "Drawing", "Talking to family", "My pet", "Deep breaths"]
-      },
-      {
-        key: "background",
-        label: "About my life",
-        placeholder: "Family, where you grew up, what you love",
-        prompt: "Tell us about your life. Your family, where you grew up, the things you love.",
-        presets: ["I love my family", "I have a pet", "I enjoy fishing", "I like cooking", "I love music", "I grew up in Gippsland"]
-      },
+    const LIKES_OPTIONS = [
+      "Playing Sports", "Camping, Hiking", "Fishing", "Hunting", "Swimming",
+      "Bicycling", "Horseback riding", "Skiing", "Keeping Pets", "Taking care of animals",
+      "Gardening to take care of plants", "Farming", "Woodworking", "Beauty and hair care",
+      "Listening to music", "Writing songs, stories, poems", "Watching TV or movies",
+      "Playing an instrument", "Being a leader of a group", "Printing", "Drawing",
+      "Painting", "Taking care of people", "Babysitting", "Going to church/synagogue/temple",
+      "Belonging to a club", "Collecting things", "Visiting with friends", "Sleeping",
+      "Eating", "Using a computer", "Playing Video Games", "Cooking", "Sewing",
+      "Knitting", "Reading", "Photography", "Roller Blading", "Motocross",
+      "Working Out / Exercising"
     ];
 
-    // Browser speech support
-    const SR = typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition);
-    const speechSupported = !!SR && typeof window !== "undefined" && "speechSynthesis" in window;
+    const STRENGTHS_OPTIONS = [
+      "I'm reliable (people can count on me)", "I'm friendly", "I am good at many things",
+      "I try to follow instructions", "I like to do things with others",
+      "I like to do things on my own", "I like to help other people",
+      "I like to keep things neat and organised", "I like to have a good time",
+      "I have good common sense", "I stick with things until they get done",
+      "I can work out my problems on my own", "I ask others for help when I need it",
+      "I can help others work out their problems", "I have a lot of energy",
+      "I'm a good listener", "I'm polite", "I'm honest", "I'm hard working",
+      "I'm usually on time", "I'm serious", "I'm generous", "I'm proud of myself",
+      "I can keep a secret", "I'm a good friend", "I'm musical", "I'm artistic",
+      "I'm creative", "I'm good with words", "I'm good with my hands",
+      "I'm good at one or two things", "I'm good at fixing things"
+    ];
 
-    function speak(text, opts = {}) {
-      if (typeof window === "undefined" || !window.speechSynthesis) return;
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 0.95;
-      u.pitch = 1.0;
-      if (opts.onend) u.onend = opts.onend;
-      window.speechSynthesis.speak(u);
-    }
+    const SKILLS_OPTIONS = [
+      "Taking care of other people", "Working with other people", "Organising things",
+      "Making changes", "Using a computer", "Answering a phone", "Woodworking",
+      "House painting", "Operating machines or tools", "Fixing cars", "Waiting on tables",
+      "Doing yard work", "Farming", "Hairdressing", "Cleaning", "Reading", "Writing",
+      "Math", "Science", "Social Studies", "Art", "Sports", "Music", "Teaching friends",
+      "Gardening", "Cooking", "Sewing or knitting", "Being a team captain"
+    ];
+
+    const WELLBEING_OPTIONS = [
+      "I've been feeling optimistic about the future",
+      "I've been feeling useful",
+      "I've been feeling relaxed",
+      "I've been feeling interested in other people",
+      "I've had energy to spare",
+      "I've been dealing with problems well",
+      "I've been thinking clearly",
+      "I've been feeling good about myself",
+      "I've been feeling close to other people",
+      "I've been feeling confident",
+      "I've been able to make up my own mind about things",
+      "I've been interested in new things",
+      "I've been cheerful",
+      "I've been feeling loved"
+    ];
+
+    const WELLBEING_SCALE = [
+      { value: 1, label: "None" },
+      { value: 2, label: "Rarely" },
+      { value: 3, label: "Some" },
+      { value: 4, label: "Often" },
+      { value: 5, label: "Always" }
+    ];
 
     function AboutMe({ onBack }) {
       const [profile, setProfile] = useState(loadProfile);
       const [saved, setSaved] = useState(false);
-      const [mode, setMode] = useState("type"); // 'type' | 'talk'
-      const [talkIdx, setTalkIdx] = useState(0);
-      const [listening, setListening] = useState(false);
-      const [speaking, setSpeaking] = useState(false);
-      const recRef = React.useRef(null);
 
       const update = (field, value) => setProfile(p => ({ ...p, [field]: value }));
-      const append = (field, value) => setProfile(p => {
-        const cur = (p[field] || "").trim();
-        const next = cur ? `${cur}, ${value}` : value;
-        return { ...p, [field]: next };
-      });
       const save = () => { saveProfile(profile); setSaved(true); setTimeout(() => setSaved(false), 2000); };
 
-      // Stop everything when leaving / unmounting
-      useEffect(() => () => {
-        try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
-        try { recRef.current && recRef.current.abort(); } catch {}
-      }, []);
+      // Cycle a "likes" item through: null → "like" → "dislike" → null
+      const cycleLike = (item) => setProfile(p => {
+        const cur = p.likes?.[item];
+        const next = cur === undefined || cur === null ? "like" : cur === "like" ? "dislike" : null;
+        const likes = { ...(p.likes || {}) };
+        if (next === null) delete likes[item]; else likes[item] = next;
+        // If item is now "dislike", remove from favorites
+        let favs = p.favoriteLikes || [];
+        if (next !== "like") favs = favs.filter(f => f !== item);
+        return { ...p, likes, favoriteLikes: favs };
+      });
 
-      const playPrompt = (text) => {
-        setSpeaking(true);
-        speak(text, { onend: () => setSpeaking(false) });
+      // Toggle a boolean checklist (strengths, skills)
+      const toggleCheck = (field, item) => setProfile(p => {
+        const cur = p[field] || {};
+        const next = { ...cur };
+        if (next[item]) delete next[item]; else next[item] = true;
+        // If unchecking, drop from favorites
+        const favField = field === "strengths" ? "favoriteStrengths" : "favoriteSkills";
+        let favs = p[favField] || [];
+        if (!next[item]) favs = favs.filter(f => f !== item);
+        return { ...p, [field]: next, [favField]: favs };
+      });
+
+      // Toggle a top-3 favorite. Capped at 3 — oldest drops off.
+      const toggleFav = (favField, item, requireSelectedField, requireSelectedValue) => setProfile(p => {
+        // Only allow favoriting if the item is "selected" in the parent list
+        if (requireSelectedField) {
+          const parent = p[requireSelectedField] || {};
+          const ok = requireSelectedValue ? parent[item] === requireSelectedValue : !!parent[item];
+          if (!ok) return p;
+        }
+        let favs = [...(p[favField] || [])];
+        if (favs.includes(item)) {
+          favs = favs.filter(f => f !== item);
+        } else {
+          favs.push(item);
+          if (favs.length > 3) favs.shift();
+        }
+        return { ...p, [favField]: favs };
+      });
+
+      // Set wellbeing rating (1–5) for an item
+      const setRating = (item, val) => setProfile(p => ({
+        ...p, wellbeing: { ...(p.wellbeing || {}), [item]: val }
+      }));
+
+      // Reusable row for likes (3-state) with star
+      const LikeRow = ({ item }) => {
+        const state = profile.likes?.[item]; // "like" | "dislike" | undefined
+        const isFav = (profile.favoriteLikes || []).includes(item);
+        const bg = state === "like" ? "#E8F5E9" : state === "dislike" ? "#FFEBEE" : "#fff";
+        const border = state === "like" ? "#66BB6A" : state === "dislike" ? "#EF5350" : "#eee";
+        const icon = state === "like" ? "❤️" : state === "dislike" ? "✕" : "";
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <button onClick={() => cycleLike(item)} style={{
+              flex: 1, textAlign: "left", background: bg, border: `2px solid ${border}`,
+              borderRadius: 12, padding: "12px 14px", fontSize: 15, fontWeight: 600,
+              color: "var(--dark)", cursor: "pointer", minHeight: 48,
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8
+            }}>
+              <span style={{ flex: 1 }}>{item}</span>
+              <span style={{ fontSize: 18 }}>{icon}</span>
+            </button>
+            <button
+              onClick={() => toggleFav("favoriteLikes", item, "likes", "like")}
+              disabled={state !== "like"}
+              style={{
+                background: isFav ? "var(--amber)" : "#f5f5f5",
+                border: "none", borderRadius: 12, width: 48, height: 48,
+                fontSize: 22, cursor: state === "like" ? "pointer" : "default",
+                opacity: state === "like" ? 1 : 0.4, flexShrink: 0
+              }}>{isFav ? "⭐" : "☆"}</button>
+          </div>
+        );
       };
 
-      const startListening = (field) => {
-        if (!SR) return;
-        try { recRef.current && recRef.current.abort(); } catch {}
-        const rec = new SR();
-        rec.lang = "en-AU";
-        rec.interimResults = false;
-        rec.maxAlternatives = 1;
-        rec.continuous = false;
-        rec.onresult = (e) => {
-          const text = e.results[0][0].transcript;
-          update(field, ((profile[field] || "") + (profile[field] ? " " : "") + text).trim());
-        };
-        rec.onerror = () => setListening(false);
-        rec.onend = () => setListening(false);
-        recRef.current = rec;
-        setListening(true);
-        try { rec.start(); } catch { setListening(false); }
+      // Reusable row for boolean checklist (strengths, skills) with star
+      const CheckRow = ({ field, favField, item }) => {
+        const checked = !!(profile[field] || {})[item];
+        const isFav = ((profile[favField]) || []).includes(item);
+        return (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <button onClick={() => toggleCheck(field, item)} style={{
+              flex: 1, textAlign: "left", background: checked ? "#E3F2FD" : "#fff",
+              border: `2px solid ${checked ? "#42A5F5" : "#eee"}`,
+              borderRadius: 12, padding: "12px 14px", fontSize: 15, fontWeight: 600,
+              color: "var(--dark)", cursor: "pointer", minHeight: 48,
+              display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8
+            }}>
+              <span style={{ flex: 1 }}>{item}</span>
+              <span style={{ fontSize: 18 }}>{checked ? "✓" : ""}</span>
+            </button>
+            <button
+              onClick={() => toggleFav(favField, item, field, true)}
+              disabled={!checked}
+              style={{
+                background: isFav ? "var(--amber)" : "#f5f5f5",
+                border: "none", borderRadius: 12, width: 48, height: 48,
+                fontSize: 22, cursor: checked ? "pointer" : "default",
+                opacity: checked ? 1 : 0.4, flexShrink: 0
+              }}>{isFav ? "⭐" : "☆"}</button>
+          </div>
+        );
       };
 
-      const stopListening = () => {
-        try { recRef.current && recRef.current.stop(); } catch {}
-        setListening(false);
-      };
+      const sectionHeader = (num, title, hint) => (
+        <div style={{ marginTop: 28, marginBottom: 14, paddingTop: 18, borderTop: "2px dashed #eee" }}>
+          <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 4 }}>Section {num} of 4</div>
+          <h2 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 6px", lineHeight: 1.2 }}>{title}</h2>
+          <p style={{ fontSize: 14, color: "#666", lineHeight: 1.4, margin: 0 }}>{hint}</p>
+        </div>
+      );
 
-      const current = ABOUT_FIELDS[talkIdx];
-      const goNext = () => setTalkIdx(i => Math.min(i + 1, ABOUT_FIELDS.length - 1));
-      const goPrev = () => setTalkIdx(i => Math.max(i - 1, 0));
-      const isLast = talkIdx === ABOUT_FIELDS.length - 1;
+      const textareaStyle = { width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", resize: "vertical", minHeight: 80, background: "#fff" };
+      const inputStyle = { width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
 
       return (
         <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
           <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
-          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>About Me 💁</h1>
-          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Tell us what we should know.</p>
+          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>About Me</h1>
+          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Help us get to know you. Tap items to mark them, star your top 3 in each section.</p>
 
-          {/* Mode toggle */}
-          <div style={{ display: "flex", background: "#fff", borderRadius: 14, padding: 4, marginBottom: 22, boxShadow: "var(--shadow-card)" }}>
-            {[
-              { id: "type", label: "Type", emoji: "⌨️" },
-              { id: "talk", label: "Talk", emoji: "🎙️" },
-            ].map(t => (
-              <button key={t.id} onClick={() => { setMode(t.id); setTalkIdx(0); stopListening(); }} style={{
-                flex: 1, background: mode === t.id ? "var(--gradient)" : "transparent",
-                color: mode === t.id ? "#fff" : "var(--dark)",
-                border: "none", borderRadius: 11, padding: "12px 8px",
-                fontSize: 15, fontWeight: 800, cursor: "pointer", minHeight: 56,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                boxShadow: mode === t.id ? "var(--shadow-warm)" : "none"
-              }}>
-                <span style={{ fontSize: 20 }}>{t.emoji}</span> {t.label}
-              </button>
-            ))}
+          {/* Name & date */}
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6, color: "var(--dark)" }}>Name</label>
+            <input type="text" value={profile.name || ""} onChange={e => update("name", e.target.value)} placeholder="Your name" style={inputStyle} />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6, color: "var(--dark)" }}>Date</label>
+            <input type="date" value={profile.date || ""} onChange={e => update("date", e.target.value)} style={inputStyle} />
           </div>
 
-          {/* TYPE MODE — all questions with preset chips */}
-          {mode === "type" && (
-            <div>
-              {ABOUT_FIELDS.map(f => (
-                <div key={f.key} style={{ marginBottom: 22 }}>
-                  <label style={{ display: "block", fontWeight: 700, fontSize: 15, marginBottom: 8 }}>{f.label}</label>
-                  <textarea
-                    value={profile[f.key] || ""}
-                    onChange={e => update(f.key, e.target.value)}
-                    placeholder={f.placeholder}
-                    rows={3}
-                    style={{ width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", resize: "vertical", minHeight: 56, background: "#fff" }}
-                  />
-                  <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {f.presets.map(p => (
-                      <button key={p} onClick={() => append(f.key, p)} style={{
-                        background: "var(--peach)", color: "var(--dark)",
-                        border: "1.5px solid rgba(255,107,0,0.25)", borderRadius: 999,
-                        padding: "8px 14px", fontSize: 14, fontWeight: 600, cursor: "pointer",
-                        minHeight: 36
-                      }}>+ {p}</button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Section 1 — Likes & Dislikes */}
+          {sectionHeader(1, "Likes & Dislikes", "Tap each one — once for like ❤️, twice for dislike ✕. Star ⭐ your 3 favourite things.")}
+          {LIKES_OPTIONS.map(item => <LikeRow key={item} item={item} />)}
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other hobbies & interests</label>
+            <textarea value={profile.otherHobbies || ""} onChange={e => update("otherHobbies", e.target.value)} placeholder="Anything else you love..." rows={3} style={textareaStyle} />
+          </div>
 
-          {/* TALK MODE — one question at a time */}
-          {mode === "talk" && (
-            <div>
-              {!speechSupported && (
-                <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: 14, marginBottom: 16, fontSize: 14, color: "var(--dark)" }}>
-                  ⚠️ Voice doesn't work on this browser. Try Safari on iPhone, or Chrome.
-                </div>
-              )}
+          {/* Section 2 — Personal Strengths */}
+          {sectionHeader(2, "About Me", "Tap each sentence that describes you. Star ⭐ the 3 that best describe you.")}
+          {STRENGTHS_OPTIONS.map(item => <CheckRow key={item} field="strengths" favField="favoriteStrengths" item={item} />)}
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other strengths</label>
+            <textarea value={profile.otherStrengths || ""} onChange={e => update("otherStrengths", e.target.value)} placeholder="Other things that describe you..." rows={3} style={textareaStyle} />
+          </div>
 
-              <div style={{ background: "#fff", borderRadius: 20, padding: 22, boxShadow: "var(--shadow-card)", border: "1px solid rgba(255,107,0,0.12)" }}>
-                <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 8 }}>
-                  Question {talkIdx + 1} of {ABOUT_FIELDS.length}
-                </div>
-                <h2 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 10px", lineHeight: 1.15 }}>
-                  {current.label}
-                </h2>
-                <p style={{ fontSize: 15, color: "#5a4030", lineHeight: 1.5, marginBottom: 16 }}>
-                  {current.prompt}
-                </p>
+          {/* Section 3 — I'm Good At */}
+          {sectionHeader(3, "I'm Good At", "Tap everything you're good at. Star ⭐ the 3 you do best.")}
+          {SKILLS_OPTIONS.map(item => <CheckRow key={item} field="skills" favField="favoriteSkills" item={item} />)}
+          <div style={{ marginTop: 12 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other things I'm good at</label>
+            <textarea value={profile.otherSkills || ""} onChange={e => update("otherSkills", e.target.value)} placeholder="Other skills..." rows={3} style={textareaStyle} />
+          </div>
 
-                <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-                  <button onClick={() => playPrompt(current.prompt)} disabled={!speechSupported || speaking} style={{
-                    flex: 1, background: speaking ? "var(--amber)" : "var(--peach)",
-                    color: "var(--dark)", border: "1.5px solid rgba(255,107,0,0.25)",
-                    borderRadius: 14, padding: "14px 12px", fontSize: 15, fontWeight: 700,
-                    cursor: speechSupported && !speaking ? "pointer" : "default", minHeight: 56,
-                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8
-                  }}>
-                    <span style={{ fontSize: 22 }}>🔊</span>
-                    {speaking ? "Playing..." : "Play question"}
-                  </button>
-                  <button
-                    onClick={() => listening ? stopListening() : startListening(current.key)}
-                    disabled={!speechSupported}
-                    style={{
-                      flex: 1,
-                      background: listening ? "var(--gradient)" : "var(--deep-red)",
-                      color: "#fff", border: "none", borderRadius: 14,
-                      padding: "14px 12px", fontSize: 15, fontWeight: 800,
-                      cursor: speechSupported ? "pointer" : "default", minHeight: 56,
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                      boxShadow: "var(--shadow-warm)",
-                      animation: listening ? "pop 0.6s ease-in-out infinite alternate" : "none"
+          {/* Section 4 — Personal Wellbeing */}
+          {sectionHeader(4, "Personal Wellbeing", "Thinking about the past 2 weeks, tap how often each was true for you.")}
+          {WELLBEING_OPTIONS.map(item => {
+            const cur = (profile.wellbeing || {})[item];
+            return (
+              <div key={item} style={{ background: "#fff", borderRadius: 14, padding: 14, marginBottom: 10, border: "2px solid #eee" }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: "var(--dark)", marginBottom: 10 }}>{item}</div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  {WELLBEING_SCALE.map(s => (
+                    <button key={s.value} onClick={() => setRating(item, s.value)} style={{
+                      flex: 1, background: cur === s.value ? "var(--gradient)" : "#f5f5f5",
+                      color: cur === s.value ? "#fff" : "var(--dark)",
+                      border: "none", borderRadius: 10, padding: "10px 4px",
+                      fontSize: 13, fontWeight: 700, cursor: "pointer", minHeight: 56,
+                      display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2
                     }}>
-                    <span style={{ fontSize: 22 }}>{listening ? "🔴" : "🎤"}</span>
-                    {listening ? "Listening..." : "Tap to answer"}
-                  </button>
-                </div>
-
-                <div style={{ marginBottom: 8 }}>
-                  <div className="label-cap" style={{ color: "var(--dark)", opacity: 0.6, marginBottom: 6 }}>Your answer</div>
-                  <textarea
-                    value={profile[current.key] || ""}
-                    onChange={e => update(current.key, e.target.value)}
-                    placeholder="Your answer will appear here..."
-                    rows={3}
-                    style={{ width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", resize: "vertical", minHeight: 56, background: "var(--off-white)" }}
-                  />
+                      <span style={{ fontSize: 18, fontWeight: 900 }}>{s.value}</span>
+                      <span style={{ fontSize: 10, opacity: 0.85 }}>{s.label}</span>
+                    </button>
+                  ))}
                 </div>
               </div>
+            );
+          })}
 
-              <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-                <button onClick={goPrev} disabled={talkIdx === 0} style={{
-                  flex: 1, background: talkIdx === 0 ? "#eee" : "#fff",
-                  color: talkIdx === 0 ? "#aaa" : "var(--dark)",
-                  border: "2px solid #eee", borderRadius: 14, padding: 14,
-                  fontSize: 15, fontWeight: 700, minHeight: 56,
-                  cursor: talkIdx === 0 ? "default" : "pointer"
-                }}>‹ Back</button>
-                <button onClick={isLast ? save : goNext} style={{
-                  flex: 2, background: "var(--gradient)", color: "#fff",
-                  border: "none", borderRadius: 14, padding: 14,
-                  fontSize: 16, fontWeight: 800, minHeight: 56, cursor: "pointer",
-                  boxShadow: "var(--shadow-warm)",
-                  fontFamily: isLast ? "'Lilita One', system-ui, sans-serif" : "inherit"
-                }}>
-                  {isLast ? (saved ? "Saved ✓" : "Save") : "Next ›"}
-                </button>
-              </div>
-            </div>
-          )}
-
-          {mode === "type" && (
-            <button onClick={save} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 18, padding: 18, fontSize: 19, cursor: "pointer", boxShadow: "var(--shadow-warm)", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em" }}>
-              {saved ? "Saved ✓" : "Save"}
-            </button>
-          )}
+          <button onClick={save} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 18, padding: 18, fontSize: 19, cursor: "pointer", boxShadow: "var(--shadow-warm)", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em", marginTop: 24 }}>
+            {saved ? "Saved ✓" : "Save"}
+          </button>
         </div>
       );
     }
