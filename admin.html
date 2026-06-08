@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Mosaic — Staff</title>
+  <meta name="theme-color" content="#1A0A00" />
+  <link rel="icon" type="image/png" href="icons/favicon-32.png" />
+
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="js/activities.js"></script>
+  <script src="js/db.js"></script>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --flame:#FF6B00; --deep-red:#E83000; --crimson:#C41010; --amber:#FFB347;
+      --peach:#FFE8D0; --dark:#1A0A00; --off-white:#FFFAF5; --ink:#1A0A00;
+      --gradient: linear-gradient(135deg,#FF6B00 0%,#E83000 55%,#C41010 100%);
+      --line:#ECE6DE;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    html,body { background:#F6F2EC; color:var(--dark); font-family:'Inter',system-ui,sans-serif; -webkit-font-smoothing:antialiased; }
+    input,textarea,select { font-size:16px; font-family:inherit; }
+    button { cursor:pointer; transition:transform .12s, filter .15s; font-family:inherit; }
+    button:not(:disabled):active { transform:scale(.97); }
+    .lilita { font-family:'Lilita One',system-ui,sans-serif; }
+    .bebas { font-family:'Bebas Neue',system-ui,sans-serif; letter-spacing:.06em; }
+    .cap { font-family:'Inter Tight',system-ui,sans-serif; font-size:11px; letter-spacing:.14em; text-transform:uppercase; font-weight:700; }
+    .card { background:#fff; border:1px solid var(--line); border-radius:16px; box-shadow:0 2px 10px rgba(26,10,0,.05); }
+    .chip { display:inline-block; border-radius:999px; padding:2px 10px; font-size:11px; font-weight:700; }
+    .btnP { background:var(--gradient); color:#fff; border:none; border-radius:12px; padding:12px 16px; font-size:15px; font-weight:800; min-height:48px; }
+    .btnS { background:#fff; color:var(--dark); border:1px solid var(--line); border-radius:12px; padding:10px 14px; font-size:14px; font-weight:700; min-height:44px; }
+    .field { width:100%; padding:12px 14px; border-radius:12px; border:2px solid var(--line); background:#fff; margin-bottom:10px; }
+    .scrollx { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+    a { color:var(--deep-red); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useCallback } = React;
+    const CFG = window.MOSAIC_CONFIG || {};
+    const DB = window.MosaicDB;
+    const LIVE = !!(DB && DB.ENABLED);
+    const ACT = window.MOSAIC_DEFAULT_ACTIVITIES || [];
+    const actById = (id) => ACT.find(a => String(a.id) === String(id));
+
+    const BLOCKS = { 1: "9am – 12pm", 2: "12pm – 3pm", 3: "3pm – 6pm", 4: "6pm – 9pm" };
+    function blockRangeLabel(act) {
+      if (!act) return "";
+      const s = BLOCKS[act.start_block], e = BLOCKS[act.end_block];
+      if (!s) return act.time || "";
+      if (!e || act.end_block === act.start_block) return s;
+      return s.split(" – ")[0] + " – " + e.split(" – ")[1];
+    }
+
+    const SERVICE_META = {
+      doctor:{e:"🩺",l:"Doctor's appointment"}, cleaning:{e:"🧽",l:"House cleaning"},
+      garden:{e:"🪴",l:"Garden / watering"}, overwhelmed:{e:"😮‍💨",l:"Feeling overwhelmed"},
+      respite:{e:"🛌",l:"Respite request"}, other:{e:"🤝",l:"Something else"},
+    };
+    const STATUS_COLOR = {
+      open:"#E83000", actioned:"#E8913A", closed:"#27AE60",
+      pending:"#E8913A", confirmed:"#27AE60", cancelled:"#999", late_cancelled:"#C41010",
+    };
+
+    const fmtDate = (iso) => { try { return new Date(iso + "T12:00:00").toLocaleDateString("en-AU",{weekday:"short",day:"numeric",month:"short"}); } catch { return iso; } };
+    const fmtDT = (iso) => { try { return new Date(iso).toLocaleString("en-AU",{day:"numeric",month:"short",hour:"numeric",minute:"2-digit"}); } catch { return ""; } };
+
+    // ── week helpers (Mon..Sun) ──
+    function mondayOf(offset) {
+      const now = new Date(); const day = now.getDay();
+      const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(now); mon.setDate(diff + offset*7); mon.setHours(12,0,0,0); return mon;
+    }
+    const isoOf = (d) => { const x = new Date(d); x.setHours(12,0,0,0); return x.toISOString().slice(0,10); };
+
+    // ============================================================
+    // DEMO ADAPTER (localStorage) — lets staff click through the loop
+    // on one device before Supabase is connected. Read/limited write.
+    // ============================================================
+    const lsGet = (k, fb) => { try { const v = JSON.parse(localStorage.getItem(k)); return v == null ? fb : v; } catch { return fb; } };
+    const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+    const demoName = () => (lsGet("mosaic_profile_v1",{}).name) || "Demo Participant";
+
+    const LocalAdmin = {
+      enabled: false,
+      listParticipants: async () => [{ id:"demo", display_name:demoName(), phone:"", mode:"both", role:"participant" }],
+      getParticipant: async () => ({ id:"demo", display_name:demoName(), phone:"", mode:"both", about_me: lsGet("mosaic_profile_v1",{}) }),
+      createParticipant: async () => { throw new Error("Connect Supabase to add real participants."); },
+      listServiceRequests: async (status) => {
+        let all = lsGet("mosaic_service_requests_v1", []);
+        if (status) all = all.filter(r => r.status === status);
+        return all.slice().reverse().map(r => ({ ...r, participant_id:"demo", profiles:{ display_name:demoName(), phone:"" } }));
+      },
+      setServiceRequestStatus: async (id, status) => {
+        const all = lsGet("mosaic_service_requests_v1", []);
+        const i = all.findIndex(r => String(r.id) === String(id)); if (i>=0){ all[i].status = status; lsSet("mosaic_service_requests_v1", all);} return true;
+      },
+      listBookingsForWeek: async (monIso, sunIso) => {
+        const map = lsGet("mosaic_bookings_v2", {}); const out = [];
+        Object.keys(map).forEach(date => {
+          if (date < monIso || date > sunIso) return;
+          (map[date]||[]).forEach(bk => {
+            const a = actById(bk.activityId) || {};
+            out.push({ id: date+"|"+bk.activityId, date, status: bk.status, cancel_charge: bk.cancel_charge, participant_id:"demo",
+              activity_id: bk.activityId, profiles:{ display_name:demoName() },
+              activities:{ name:a.name, emoji:a.emoji, color:a.color, start_block:a.start_block, end_block:a.end_block, bring_money_amount:a.bring_money, location:a.location } });
+          });
+        });
+        return out.sort((x,y)=> x.date.localeCompare(y.date));
+      },
+      setBookingStatus: async (id, status) => {
+        const [date, aid] = String(id).split("|"); const map = lsGet("mosaic_bookings_v2", {});
+        const list = map[date]||[]; const i = list.findIndex(b => String(b.activityId)===aid);
+        if (i>=0){ list[i].status = status; map[date]=list; lsSet("mosaic_bookings_v2", map);} return true;
+      },
+      assignWorker: async () => true,
+      listActivities: async () => ACT.map(a => ({ id:a.id, name:a.name, emoji:a.emoji, color:a.color, category:a.category, day_of_week:(a.days||[])[0], start_block:a.start_block, end_block:a.end_block, mode:a.mode, notes:a.location, bring_money_amount:a.bring_money, practitioner_led:a.practitioner_led })),
+      saveActivity: async () => { throw new Error("Connect Supabase to edit activities."); },
+      deleteActivity: async () => { throw new Error("Connect Supabase to edit activities."); },
+      listWorkers: async () => [],
+      listMessages: async () => {
+        const c = lsGet("mosaic_chat_v1", []) || [];
+        return c.map((m,i)=>({ id:i, sender: m.from==="me"?"participant":"staff", body:m.text, created_at:m.at }));
+      },
+      replyMessage: async (pid, text) => {
+        const c = lsGet("mosaic_chat_v1", []) || []; c.push({ id:Date.now(), from:"them", at:new Date().toISOString(), text }); lsSet("mosaic_chat_v1", c); return true;
+      },
+    };
+
+    const A = LIVE ? DB.admin : LocalAdmin;
+
+    // ============================================================
+    // STAFF LOGIN (live only)
+    // ============================================================
+    function StaffLogin({ onLoggedIn }) {
+      const [email,setEmail]=useState(""); const [pwd,setPwd]=useState("");
+      const [busy,setBusy]=useState(false); const [err,setErr]=useState("");
+      const submit = async () => {
+        setErr(""); setBusy(true);
+        try { await DB.auth.staffLogin(email, pwd); onLoggedIn(); }
+        catch(e){ setErr(e.message || "Could not sign in."); } finally { setBusy(false); }
+      };
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
+          <div className="card" style={{ padding:28, maxWidth:380, width:"100%" }}>
+            <div className="bebas" style={{ fontSize:30, color:"var(--deep-red)" }}>MOSAIC STAFF</div>
+            <div className="cap" style={{ color:"#999", marginBottom:20 }}>Dashboard sign in</div>
+            <input className="field" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" autoCapitalize="none" type="email" />
+            <input className="field" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="Password" type="password" onKeyDown={e=>{ if(e.key==="Enter") submit(); }} />
+            {err && <div style={{ color:"var(--deep-red)", fontSize:14, fontWeight:600, marginBottom:10 }}>{err}</div>}
+            <button className="btnP" style={{ width:"100%" }} disabled={busy} onClick={submit}>{busy?"Signing in…":"Sign in"}</button>
+            <a href="index.html" style={{ display:"inline-block", marginTop:16, fontSize:13, color:"#999", textDecoration:"none", fontWeight:600 }}>← Participant app</a>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // SHARED bits
+    // ============================================================
+    function StatusChip({ value }) {
+      const c = STATUS_COLOR[value] || "#999";
+      return <span className="chip" style={{ background:c+"1A", color:c }}>{(value||"").replace("_"," ")}</span>;
+    }
+    function Empty({ children }) {
+      return <div style={{ textAlign:"center", color:"#aaa", padding:"48px 20px", fontSize:15 }}>{children}</div>;
+    }
+    function Loading(){ return <div style={{ textAlign:"center", color:"#bbb", padding:"40px", fontSize:14 }}>Loading…</div>; }
+
+    // ============================================================
+    // REQUESTS TAB
+    // ============================================================
+    function RequestsTab() {
+      const [rows,setRows]=useState(null); const [filter,setFilter]=useState("open"); const [err,setErr]=useState("");
+      const load = useCallback(async ()=>{ try{ setRows(await A.listServiceRequests(filter==="all"?null:filter)); }catch(e){ setErr(e.message);} },[filter]);
+      useEffect(()=>{ load(); const t=setInterval(load, 8000); return ()=>clearInterval(t); },[load]);
+      const setStatus = async (id,status)=>{ await A.setServiceRequestStatus(id,status); load(); };
+
+      return (
+        <div>
+          <div style={{ display:"flex", gap:8, marginBottom:14 }}>
+            {["open","actioned","closed","all"].map(f=>(
+              <button key={f} onClick={()=>setFilter(f)} className={filter===f?"":""} style={{ border:"none", background: filter===f?"var(--ink)":"#fff", color: filter===f?"#fff":"#666", borderRadius:999, padding:"8px 16px", fontSize:13, fontWeight:700, border: filter===f?"none":"1px solid var(--line)" }}>{f[0].toUpperCase()+f.slice(1)}</button>
+            ))}
+          </div>
+          {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
+          {rows===null ? <Loading/> : rows.length===0 ? <Empty>No {filter==="all"?"":filter} requests 🎉</Empty> : (
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {rows.map(r=>{
+                const meta = SERVICE_META[r.type] || SERVICE_META.other;
+                return (
+                  <div key={r.id} className="card" style={{ padding:16 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                      <div style={{ fontSize:28 }}>{meta.e}</div>
+                      <div style={{ flex:1, minWidth:0 }}>
+                        <div style={{ fontWeight:800, fontSize:16 }}>{meta.l}</div>
+                        <div style={{ fontSize:13, color:"#777" }}>{r.profiles?.display_name || "Participant"} · {fmtDT(r.created_at)}</div>
+                      </div>
+                      <StatusChip value={r.status} />
+                    </div>
+                    {r.detail && <div style={{ marginTop:10, fontSize:14, color:"#444", background:"#FAF6F0", borderRadius:10, padding:"10px 12px" }}>{r.detail}</div>}
+                    <div style={{ display:"flex", gap:8, marginTop:12 }}>
+                      {r.status!=="actioned" && <button className="btnS" onClick={()=>setStatus(r.id,"actioned")}>Mark actioned</button>}
+                      {r.status!=="closed" && <button className="btnS" onClick={()=>setStatus(r.id,"closed")}>Close</button>}
+                      {r.status!=="open" && <button className="btnS" onClick={()=>setStatus(r.id,"open")}>Reopen</button>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // WEEK TAB (bookings)
+    // ============================================================
+    function WeekTab() {
+      const [offset,setOffset]=useState(0); const [rows,setRows]=useState(null); const [err,setErr]=useState("");
+      const [workers,setWorkers]=useState([]);
+      const mon = useMemo(()=>mondayOf(offset),[offset]);
+      const monIso = isoOf(mon);
+      const sun = new Date(mon); sun.setDate(mon.getDate()+6); const sunIso = isoOf(sun);
+      const load = useCallback(async ()=>{ setRows(null); try{ setRows(await A.listBookingsForWeek(monIso,sunIso)); }catch(e){ setErr(e.message);} },[monIso,sunIso]);
+      useEffect(()=>{ load(); },[load]);
+      useEffect(()=>{ A.listWorkers().then(setWorkers).catch(()=>{}); },[]);
+
+      const byDate = useMemo(()=>{ const m={}; (rows||[]).forEach(b=>{ (m[b.date]=m[b.date]||[]).push(b); }); return m; },[rows]);
+      const dates = Object.keys(byDate).sort();
+      const setStatus = async (id,status)=>{ await A.setBookingStatus(id,status); load(); };
+      const assign = async (id,wid)=>{ await A.assignWorker(id,wid); load(); };
+
+      return (
+        <div>
+          <div className="card" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"10px 14px", marginBottom:14 }}>
+            <button className="btnS" onClick={()=>setOffset(o=>o-1)}>‹</button>
+            <div style={{ textAlign:"center" }}>
+              <div className="cap" style={{ color:"#999" }}>Week of</div>
+              <div className="bebas" style={{ fontSize:18 }}>{fmtDate(monIso)} – {fmtDate(sunIso)}</div>
+            </div>
+            <button className="btnS" onClick={()=>setOffset(o=>o+1)}>›</button>
+          </div>
+          {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
+          {rows===null ? <Loading/> : dates.length===0 ? <Empty>No bookings this week.</Empty> : dates.map(date=>(
+            <div key={date} style={{ marginBottom:18 }}>
+              <div className="cap" style={{ color:"var(--flame)", marginBottom:8 }}>{fmtDate(date)}</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+                {byDate[date].map(b=>{
+                  const a = b.activities || actById(b.activity_id) || {};
+                  return (
+                    <div key={b.id} className="card" style={{ padding:"12px 14px", borderLeft:`5px solid ${a.color||"#ccc"}` }}>
+                      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                        <div style={{ fontSize:22 }}>{a.emoji}</div>
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <div style={{ fontWeight:800, fontSize:15 }}>{a.name || "Activity"}</div>
+                          <div style={{ fontSize:12, color:"#777" }}>{b.profiles?.display_name} · {blockRangeLabel(a)}{a.bring_money_amount?` · bring $${a.bring_money_amount}`:""}</div>
+                        </div>
+                        <StatusChip value={b.status} />
+                      </div>
+                      <div className="scrollx" style={{ display:"flex", gap:8, marginTop:10 }}>
+                        {b.status!=="confirmed" && <button className="btnS" onClick={()=>setStatus(b.id,"confirmed")}>Confirm</button>}
+                        {b.status!=="cancelled" && <button className="btnS" onClick={()=>setStatus(b.id,"cancelled")}>Cancel</button>}
+                        {workers.length>0 && (
+                          <select className="btnS" style={{ padding:"8px 10px" }} value={b.worker_id||""} onChange={e=>assign(b.id, e.target.value||null)}>
+                            <option value="">Assign worker…</option>
+                            {workers.map(w=> <option key={w.id} value={w.id}>{w.display_name}</option>)}
+                          </select>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // PEOPLE TAB
+    // ============================================================
+    function NewParticipant({ onDone, onCancel }) {
+      const rnd = () => String(Math.floor(1000 + Math.abs((Date.now()%9000))));
+      const [f,setF]=useState({ name:"", phone:"", accessCode:rnd(), pin:"", mode:"both" });
+      const [busy,setBusy]=useState(false); const [err,setErr]=useState(""); const [done,setDone]=useState(null);
+      const up = (k,v)=> setF(s=>({ ...s, [k]:v }));
+      const submit = async ()=>{
+        setErr(""); setBusy(true);
+        try { const r = await A.createParticipant(f); setDone({ code:f.accessCode, pin:f.pin, name:f.name }); }
+        catch(e){ setErr(e.message); } finally { setBusy(false); }
+      };
+      if (done) return (
+        <div className="card" style={{ padding:20 }}>
+          <div style={{ fontSize:40, marginBottom:8 }}>✅</div>
+          <h3 className="lilita" style={{ fontSize:22, marginBottom:8 }}>{done.name} is ready</h3>
+          <p style={{ fontSize:15, color:"#444", marginBottom:12 }}>Give them these to log in (write them down now):</p>
+          <div style={{ background:"#FAF6F0", borderRadius:12, padding:14, fontSize:18, fontWeight:800, letterSpacing:".05em" }}>
+            Code: {done.code}<br/>PIN: {done.pin}
+          </div>
+          <button className="btnP" style={{ width:"100%", marginTop:16 }} onClick={onDone}>Done</button>
+        </div>
+      );
+      return (
+        <div className="card" style={{ padding:20 }}>
+          <h3 className="lilita" style={{ fontSize:22, marginBottom:14 }}>New participant</h3>
+          <input className="field" placeholder="Full name" value={f.name} onChange={e=>up("name",e.target.value)} />
+          <input className="field" placeholder="Phone (for SMS reminders)" value={f.phone} onChange={e=>up("phone",e.target.value)} />
+          <input className="field" placeholder="Access code" value={f.accessCode} onChange={e=>up("accessCode",e.target.value)} autoCapitalize="none" />
+          <input className="field" placeholder="PIN (4+ digits)" value={f.pin} onChange={e=>up("pin",e.target.value)} inputMode="numeric" />
+          <select className="field" value={f.mode} onChange={e=>up("mode",e.target.value)}>
+            <option value="both">Programs + 1:1</option>
+            <option value="program">Programs only</option>
+            <option value="one_on_one">1:1 only</option>
+          </select>
+          {err && <div style={{ color:"var(--deep-red)", fontSize:14, marginBottom:10 }}>{err}</div>}
+          <div style={{ display:"flex", gap:8 }}>
+            <button className="btnS" style={{ flex:1 }} onClick={onCancel}>Cancel</button>
+            <button className="btnP" style={{ flex:2 }} disabled={busy || !f.name || !f.accessCode || !f.pin} onClick={submit}>{busy?"Creating…":"Create participant"}</button>
+          </div>
+        </div>
+      );
+    }
+
+    function ProfileView({ id, onBack }) {
+      const [p,setP]=useState(null); const [err,setErr]=useState("");
+      useEffect(()=>{ A.getParticipant(id).then(setP).catch(e=>setErr(e.message)); },[id]);
+      if (err) return <div style={{ color:"var(--deep-red)" }}>{err}</div>;
+      if (!p) return <Loading/>;
+      const am = p.about_me || {};
+      const favList = (arr)=> (arr&&arr.length)? arr.join(", ") : "—";
+      const wellbeing = am.wellbeing || {};
+      return (
+        <div>
+          <button className="btnS" style={{ marginBottom:14 }} onClick={onBack}>‹ All people</button>
+          <div className="card" style={{ padding:20, marginBottom:14 }}>
+            <h2 className="lilita" style={{ fontSize:26 }}>{p.display_name}</h2>
+            <div style={{ fontSize:14, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
+          </div>
+          <div className="card" style={{ padding:20 }}>
+            <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>About me (self-reported)</div>
+            <Row k="Top likes" v={favList(am.favoriteLikes)} />
+            <Row k="Other hobbies" v={am.otherHobbies||"—"} />
+            <Row k="Top strengths" v={favList(am.favoriteStrengths)} />
+            <Row k="Best skills" v={favList(am.favoriteSkills)} />
+            <Row k="Other skills" v={am.otherSkills||"—"} />
+            <div className="cap" style={{ color:"var(--flame)", margin:"16px 0 10px" }}>Care notes (staff)</div>
+            <Row k="Dislikes" v={p.dislikes||"—"} />
+            <Row k="Allergies" v={p.allergies||"—"} />
+            <Row k="Behavioural regulators" v={p.behavioural_regulators||"—"} />
+            <Row k="Life background" v={p.life_background||"—"} />
+            {Object.keys(wellbeing).length>0 && (
+              <>
+                <div className="cap" style={{ color:"var(--flame)", margin:"16px 0 10px" }}>Wellbeing (1 none → 5 always)</div>
+                {Object.keys(wellbeing).map(k=> <Row key={k} k={k} v={String(wellbeing[k])} />)}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+    function Row({k,v}){ return (
+      <div style={{ display:"flex", gap:12, padding:"8px 0", borderBottom:"1px solid #F2ECE4" }}>
+        <div style={{ width:160, flexShrink:0, fontSize:13, color:"#999", fontWeight:600 }}>{k}</div>
+        <div style={{ fontSize:14, color:"#333", flex:1 }}>{v}</div>
+      </div>
+    ); }
+
+    function PeopleTab() {
+      const [rows,setRows]=useState(null); const [err,setErr]=useState("");
+      const [view,setView]=useState("list"); // list | new | <id>
+      const load = useCallback(async ()=>{ try{ setRows(await A.listParticipants()); }catch(e){ setErr(e.message);} },[]);
+      useEffect(()=>{ load(); },[load]);
+      if (view==="new") return <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />;
+      if (view!=="list") return <ProfileView id={view} onBack={()=>setView("list")} />;
+      return (
+        <div>
+          <button className="btnP" style={{ marginBottom:14 }} onClick={()=>setView("new")}>+ New participant</button>
+          {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
+          {rows===null ? <Loading/> : rows.length===0 ? <Empty>No participants yet.</Empty> : (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {rows.map(p=>(
+                <button key={p.id} className="card" style={{ padding:16, textAlign:"left", display:"flex", alignItems:"center", gap:12 }} onClick={()=>setView(p.id)}>
+                  <div style={{ width:42, height:42, borderRadius:"50%", background:"var(--gradient)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontFamily:"'Lilita One'" }}>{(p.display_name||"?")[0]}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:800, fontSize:16 }}>{p.display_name}</div>
+                    <div style={{ fontSize:13, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
+                  </div>
+                  <span style={{ color:"#ccc", fontSize:20 }}>›</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // ACTIVITIES TAB
+    // ============================================================
+    function ActivitiesTab() {
+      const [rows,setRows]=useState(null); const [err,setErr]=useState(""); const [edit,setEdit]=useState(null);
+      const load = useCallback(async ()=>{ try{ setRows(await A.listActivities()); }catch(e){ setErr(e.message);} },[]);
+      useEffect(()=>{ load(); },[load]);
+      const blank = { name:"", emoji:"⭐", color:"#E8913A", category:"", day_of_week:1, start_block:1, end_block:2, mode:"program", notes:"", bring_money_amount:null, practitioner_led:false };
+      const save = async ()=>{ try{ await A.saveActivity(edit); setEdit(null); load(); }catch(e){ alert(e.message); } };
+      const del = async (id)=>{ if(!confirm("Delete this activity?")) return; try{ await A.deleteActivity(id); load(); }catch(e){ alert(e.message); } };
+      const DOW = ["","Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+      if (edit) {
+        const up=(k,v)=>setEdit(s=>({ ...s, [k]:v }));
+        return (
+          <div className="card" style={{ padding:20 }}>
+            <h3 className="lilita" style={{ fontSize:22, marginBottom:14 }}>{edit.id?"Edit":"New"} activity</h3>
+            <input className="field" placeholder="Name" value={edit.name} onChange={e=>up("name",e.target.value)} />
+            <div style={{ display:"flex", gap:8 }}>
+              <input className="field" style={{ width:90 }} placeholder="Emoji" value={edit.emoji||""} onChange={e=>up("emoji",e.target.value)} />
+              <input className="field" style={{ flex:1 }} placeholder="Category" value={edit.category||""} onChange={e=>up("category",e.target.value)} />
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <input className="field" style={{ width:120 }} type="color" value={edit.color||"#E8913A"} onChange={e=>up("color",e.target.value)} />
+              <input className="field" style={{ flex:1 }} placeholder="Location (notes)" value={edit.notes||""} onChange={e=>up("notes",e.target.value)} />
+            </div>
+            <div style={{ display:"flex", gap:8 }}>
+              <select className="field" value={edit.day_of_week||1} onChange={e=>up("day_of_week",+e.target.value)}>{[1,2,3,4,5,6,7].map(d=><option key={d} value={d}>{DOW[d]}</option>)}</select>
+              <select className="field" value={edit.start_block||1} onChange={e=>up("start_block",+e.target.value)}>{[1,2,3,4].map(b=><option key={b} value={b}>{BLOCKS[b]}</option>)}</select>
+              <select className="field" value={edit.end_block||2} onChange={e=>up("end_block",+e.target.value)}>{[1,2,3,4].map(b=><option key={b} value={b}>{BLOCKS[b]}</option>)}</select>
+            </div>
+            <select className="field" value={edit.mode||"program"} onChange={e=>up("mode",e.target.value)}>
+              <option value="program">Program</option><option value="one_on_one">1:1</option><option value="both">Both</option>
+            </select>
+            <div style={{ display:"flex", gap:8 }}>
+              <button className="btnS" style={{ flex:1 }} onClick={()=>setEdit(null)}>Cancel</button>
+              <button className="btnP" style={{ flex:2 }} disabled={!edit.name} onClick={save}>Save</button>
+            </div>
+          </div>
+        );
+      }
+      return (
+        <div>
+          {!LIVE && <div className="card" style={{ padding:12, marginBottom:12, fontSize:13, color:"#777" }}>Demo mode — connect Supabase to add or edit activities.</div>}
+          {LIVE && <button className="btnP" style={{ marginBottom:14 }} onClick={()=>setEdit(blank)}>+ New activity</button>}
+          {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
+          {rows===null ? <Loading/> : (
+            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+              {rows.map(a=>(
+                <div key={a.id} className="card" style={{ padding:14, display:"flex", alignItems:"center", gap:12, borderLeft:`5px solid ${a.color||"#ccc"}` }}>
+                  <div style={{ fontSize:22 }}>{a.emoji}</div>
+                  <div style={{ flex:1 }}>
+                    <div style={{ fontWeight:800, fontSize:15 }}>{a.name}</div>
+                    <div style={{ fontSize:12, color:"#777" }}>{DOW[a.day_of_week]||""} · {blockRangeLabel(a)} · {a.mode}{a.notes?` · ${a.notes}`:""}</div>
+                  </div>
+                  {LIVE && <button className="btnS" onClick={()=>setEdit(a)}>Edit</button>}
+                  {LIVE && <button className="btnS" onClick={()=>del(a.id)}>✕</button>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // CHAT TAB
+    // ============================================================
+    function ChatTab() {
+      const [people,setPeople]=useState(null); const [pid,setPid]=useState(null);
+      const [msgs,setMsgs]=useState(null); const [draft,setDraft]=useState("");
+      useEffect(()=>{ A.listParticipants().then(ps=>{ setPeople(ps); if(ps.length===1) setPid(ps[0].id); }).catch(()=>{}); },[]);
+      const load = useCallback(async ()=>{ if(!pid) return; try{ setMsgs(await A.listMessages(pid)); }catch(e){} },[pid]);
+      useEffect(()=>{ load(); const t=setInterval(load,6000); return ()=>clearInterval(t); },[load]);
+      const send = async ()=>{ const t=draft.trim(); if(!t||!pid) return; setDraft(""); await A.replyMessage(pid,t); load(); };
+
+      if (people===null) return <Loading/>;
+      if (!pid) return (
+        <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+          {people.length===0 ? <Empty>No participants to message yet.</Empty> : people.map(p=>(
+            <button key={p.id} className="card" style={{ padding:16, textAlign:"left", fontWeight:800 }} onClick={()=>setPid(p.id)}>{p.display_name}</button>
+          ))}
+        </div>
+      );
+      const person = people.find(p=>p.id===pid);
+      return (
+        <div>
+          {people.length>1 && <button className="btnS" style={{ marginBottom:12 }} onClick={()=>{ setPid(null); setMsgs(null); }}>‹ All chats</button>}
+          <div style={{ fontWeight:800, fontSize:18, marginBottom:12 }}>{person?.display_name}</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14, maxHeight:"50vh", overflowY:"auto" }}>
+            {msgs===null ? <Loading/> : msgs.length===0 ? <Empty>No messages yet.</Empty> : msgs.map(m=>{
+              const staff = m.sender==="staff";
+              return (
+                <div key={m.id} style={{ alignSelf: staff?"flex-end":"flex-start", maxWidth:"80%" }}>
+                  <div style={{ background: staff?"var(--deep-red)":"#fff", color: staff?"#fff":"#222", border: staff?"none":"1px solid var(--line)", borderRadius:14, padding:"10px 14px", fontSize:15 }}>{m.body}</div>
+                  <div style={{ fontSize:10, color:"#aaa", margin:"2px 6px", textAlign: staff?"right":"left" }}>{fmtDT(m.created_at)}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display:"flex", gap:8 }}>
+            <input className="field" style={{ marginBottom:0, flex:1 }} placeholder="Reply…" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") send(); }} />
+            <button className="btnP" onClick={send} disabled={!draft.trim()}>Send</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // SHELL
+    // ============================================================
+    const TABS = [
+      { id:"requests", label:"Requests", emoji:"🛎️", C:RequestsTab },
+      { id:"week", label:"Week", emoji:"📅", C:WeekTab },
+      { id:"people", label:"People", emoji:"👥", C:PeopleTab },
+      { id:"activities", label:"Activities", emoji:"🎯", C:ActivitiesTab },
+      { id:"chat", label:"Chat", emoji:"💬", C:ChatTab },
+    ];
+
+    function Dashboard({ onLogout }) {
+      const [tab,setTab]=useState("requests");
+      const Active = (TABS.find(t=>t.id===tab)||TABS[0]).C;
+      return (
+        <div style={{ maxWidth:680, margin:"0 auto", padding:"0 0 90px" }}>
+          <div style={{ background:"var(--gradient)", color:"#fff", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div>
+              <div className="bebas" style={{ fontSize:24, lineHeight:.9 }}>MOSAIC STAFF</div>
+              <div className="cap" style={{ opacity:.85 }}>{LIVE ? "Live" : "Demo mode"}</div>
+            </div>
+            <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontWeight:700, fontSize:13 }}>{LIVE?"Log out":"Exit"}</button>
+          </div>
+          <div style={{ padding:"18px 16px" }}><Active/></div>
+          <nav style={{ position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:"1px solid var(--line)", display:"flex", justifyContent:"space-around", padding:"6px 4px calc(6px + env(safe-area-inset-bottom))", zIndex:50 }}>
+            {TABS.map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, border:"none", background:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:"8px 4px", color: tab===t.id?"var(--deep-red)":"#999", fontWeight:800 }}>
+                <span style={{ fontSize:20 }}>{t.emoji}</span>
+                <span style={{ fontSize:11 }}>{t.label}</span>
+              </button>
+            ))}
+          </nav>
+        </div>
+      );
+    }
+
+    function App() {
+      const [boot,setBoot]=useState("loading");
+      const [authed,setAuthed]=useState(false);
+      useEffect(()=>{
+        (async ()=>{
+          if (!LIVE) { setAuthed(true); setBoot("ready"); return; }
+          if (DB.ready) { try{ await DB.ready; }catch(e){} }
+          const s = DB.auth.session;
+          setAuthed(!!(s && s.role && s.role!=="participant"));
+          setBoot("ready");
+        })();
+      },[]);
+      const logout = async ()=>{ if(LIVE) await DB.auth.logout(); setAuthed(false); };
+      if (boot==="loading") return <div style={{ padding:60, textAlign:"center", color:"#bbb" }}>Loading…</div>;
+      if (LIVE && !authed) return <StaffLogin onLoggedIn={()=>setAuthed(true)} />;
+      return <Dashboard onLogout={logout} />;
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+  </script>
+</body>
+</html>

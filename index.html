@@ -2,12 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Mosaic Elite Health</title>
+
+  <!-- PWA / home-screen -->
+  <meta name="theme-color" content="#E83000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mosaic" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Backend (Supabase) — degrades to demo/localStorage when config.js is blank -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="js/db.js"></script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -85,7 +100,10 @@
     const STORAGE_REQUESTS = "mosaic_service_requests_v1";
     const STORAGE_SMS = "mosaic_sms_queue_v1";
     const STORAGE_CHAT = "mosaic_chat_v1";
-    const LATE_CANCEL_CUTOFF_DAYS = 4; // org_settings.late_cancel_cutoff_days
+    const CFG = window.MOSAIC_CONFIG || {};
+    const DB = window.MosaicDB;
+    const LATE_CANCEL_CUTOFF_DAYS = CFG.LATE_CANCEL_CUTOFF_DAYS || 4; // org_settings.late_cancel_cutoff_days
+    const MAX_SESSIONS_PER_DAY = CFG.MAX_SESSIONS_PER_DAY || 2;
 
     // 3-hour blocks. Spec: 9-12, 12-3, 3-6, 6-9
     const BLOCKS = [
@@ -100,7 +118,9 @@
     // mode: 'program' | 'one_on_one' | 'both' (feature 05)
     // practitioner_led: skip late-cancel charge (feature 08)
     // bring_money: amount appended to night-before SMS (feature 10)
-    const ACTIVITIES = [
+    // `let` (not const): replaced at runtime with staff-managed activities
+    // from Supabase when the backend is configured (see initActivities()).
+    let ACTIVITIES = [
       // ===== Kept (updated days/times) =====
       { id: 1,  emoji: "🍳", name: "Lifestyle Cooking", days: [1],    start_block: 1, end_block: 2, time: "9am – 3pm",  category: "Capacity Building",       color: "#E8913A", mode: "program", location: "Lakes" },
       { id: 2,  emoji: "🎣", name: "Cast a Line",       days: [4],    start_block: 2, end_block: 2, time: "12pm – 3pm", category: "Community Participation", color: "#4A90D9", mode: "program", location: "Lakes", bring_money: 20 },
@@ -141,8 +161,10 @@
     const DAY_FULL  = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     // TODO(owner): spec says Mon–Sun. Prototype is Mon–Fri. Extend if/when owner OKs design change.
 
-    // TODO(owner): wire participant mode from auth. Default 'both' for prototype so tabs show.
-    const CURRENT_PARTICIPANT_MODE = "both";
+    // Participant identity comes from the logged-in session (set by db.js).
+    // In demo mode there is one local participant; name falls back to profile.
+    const sessionName = () => (DB && DB.auth.session && DB.auth.session.name) || loadProfile().name || "";
+    const sessionMode = () => (DB && DB.auth.session && DB.auth.session.mode) || "both";
 
     // ============================================================
     // STORAGE HELPERS
@@ -221,10 +243,30 @@
       });
     }
 
+    // Human label for an activity's full time span (start block → end block).
+    // Fixes the old bug where a 9am–3pm session displayed only "9am – 12pm".
+    function blockRangeLabel(act) {
+      const s = BLOCKS.find(b => b.id === act.start_block);
+      const e = BLOCKS.find(b => b.id === act.end_block);
+      if (!s) return act.time || "";
+      if (!e || e.id === s.id) return s.label;
+      return s.label.split(" – ")[0] + " – " + e.label.split(" – ")[1];
+    }
+
+    // Load activities from Supabase (if configured); otherwise keep built-ins.
+    async function initActivities(onReady) {
+      try {
+        const list = DB && DB.activities && (await DB.activities.list());
+        if (list && list.length) ACTIVITIES = list;
+      } catch (e) { /* keep built-ins */ }
+      onReady && onReady();
+    }
+
     // ============================================================
     // SPLASH (unchanged design)
     // ============================================================
-    function Splash({ onStart }) {
+    function Splash({ onStart, name }) {
+      const first = (name || "").trim().split(" ")[0];
       return (
         <div className="route-enter" style={{
           minHeight: "100vh", background: "var(--gradient)", position: "relative", overflow: "hidden",
@@ -240,7 +282,7 @@
             <div className="bebas" style={{ fontSize: 56, lineHeight: 0.9, color: "#fff", marginBottom: 4 }}>MOSAIC</div>
             <div className="label-cap" style={{ color: "rgba(255,255,255,0.85)", marginBottom: 32 }}>Elite Health Community Hub</div>
             <h1 className="lilita" style={{ fontSize: 38, margin: "0 0 8px", lineHeight: 1.1, color: "#fff" }}>
-              Hey Trey! 👋
+              {first ? `Hey ${first}! 👋` : "Hey there! 👋"}
             </h1>
             <p style={{ fontSize: 16, color: "rgba(255,255,255,0.92)", margin: "0 0 44px", fontWeight: 500 }}>
               Ready to pick your activities for the week?
@@ -354,12 +396,16 @@
       { value: 5, label: "Always" }
     ];
 
-    function AboutMe({ onBack }) {
+    function AboutMe({ onBack, onLogout }) {
       const [profile, setProfile] = useState(loadProfile);
       const [saved, setSaved] = useState(false);
 
       const update = (field, value) => setProfile(p => ({ ...p, [field]: value }));
-      const save = () => { saveProfile(profile); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+      const save = () => {
+        // Writes locally AND syncs to Supabase when configured.
+        if (DB && DB.pushProfile) DB.pushProfile(profile); else saveProfile(profile);
+        setSaved(true); setTimeout(() => setSaved(false), 2000);
+      };
 
       // Cycle a "likes" item through: null → "like" → "dislike" → null
       const cycleLike = (item) => setProfile(p => {
@@ -547,6 +593,12 @@
           <button onClick={save} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 18, padding: 18, fontSize: 19, cursor: "pointer", boxShadow: "var(--shadow-warm)", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em", marginTop: 24 }}>
             {saved ? "Saved ✓" : "Save"}
           </button>
+
+          {onLogout && (
+            <button onClick={onLogout} style={{ width: "100%", background: "none", color: "#999", border: "none", padding: 16, fontSize: 14, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
+              Log out
+            </button>
+          )}
         </div>
       );
     }
@@ -569,16 +621,14 @@
       const [submitted, setSubmitted] = useState(false);
 
       const submit = () => {
-        const all = loadRequests();
-        all.push({
-          id: Date.now(),
-          type: picked.type,
-          detail,
-          status: "open",
-          created_at: new Date().toISOString(),
-        });
-        saveRequests(all);
-        // TODO(supabase): also email admin/health lead via serverless route.
+        // Persists locally + (when live) to Supabase and pings staff via /api/notify.
+        if (DB && DB.createServiceRequest) {
+          DB.createServiceRequest(picked.type, detail);
+        } else {
+          const all = loadRequests();
+          all.push({ id: Date.now(), type: picked.type, detail, status: "open", created_at: new Date().toISOString() });
+          saveRequests(all);
+        }
         setSubmitted(true);
       };
 
@@ -682,7 +732,7 @@
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {items.map(({ activity: act, activityId }) => {
-                      const blockLabel = BLOCKS.find(b => b.id === act.start_block)?.label || act.time;
+                      const blockLabel = blockRangeLabel(act);
                       return (
                         <div key={activityId} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", display: "flex", alignItems: "center", gap: 14, borderLeft: `5px solid ${act.color}` }}>
                           <div style={{ width: 52, height: 52, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{act.emoji}</div>
@@ -721,7 +771,7 @@
     // WOULD be sent so the owner can sanity-check copy before wiring Twilio.
     // ============================================================
     function buildSmsForBooking(participantName, activity, dateIso) {
-      const blockLabel = BLOCKS.find(b => b.id === activity.start_block)?.label || activity.time;
+      const blockLabel = blockRangeLabel(activity);
       let msg = `Tomorrow: ${participantName} wants to ${activity.name} from ${blockLabel}.`;
       if (activity.bring_money) {
         msg += ` You'll need to bring $${activity.bring_money} — Mosaic doesn't pay for client lunches.`;
@@ -735,7 +785,7 @@
     }
 
     function seedChat() {
-      const participantName = "Trey";
+      const participantName = (sessionName().trim().split(" ")[0]) || "there";
       const bookings = loadBookings();
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -766,11 +816,25 @@
     }
 
     function ChatScreen({ onBack }) {
+      const live = DB && DB.ENABLED;
       const [messages, setMessages] = useState(() => loadChat() || seedChat());
       const [draft, setDraft] = useState("");
       const scrollerRef = React.useRef(null);
 
-      useEffect(() => { saveChat(messages); }, [messages]);
+      // Live mode: pull the real thread + poll for staff replies.
+      useEffect(() => {
+        if (!live) return;
+        let alive = true;
+        const refresh = async () => {
+          const m = await DB.listMessages();
+          if (alive && m) setMessages(m.length ? m : seedChat());
+        };
+        refresh();
+        const t = setInterval(refresh, 6000);
+        return () => { alive = false; clearInterval(t); };
+      }, [live]);
+
+      useEffect(() => { if (!live) saveChat(messages); }, [messages, live]);
       useEffect(() => {
         if (scrollerRef.current) scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
       }, [messages]);
@@ -780,8 +844,11 @@
         if (!text) return;
         setMessages(m => [...m, { id: Date.now(), from: "me", at: new Date().toISOString(), text }]);
         setDraft("");
-        // TODO(supabase): post to messages table; trigger worker notification.
-        // Auto-reply stub so the chat feels alive in prototype.
+        if (live) {
+          DB.sendMessage(text); // persisted; staff reply arrives via poll
+          return;
+        }
+        // Demo mode: friendly auto-reply stub so the chat feels alive.
         setTimeout(() => {
           setMessages(m => [...m, {
             id: Date.now() + 1, from: "them", at: new Date().toISOString(),
@@ -922,8 +989,9 @@
       const [confirm, setConfirm] = useState(null);    // {activity, dateIso, anchor}
       const [conflict, setConflict] = useState(null);  // {existingActivity, candidateActivity}
       const [cancelAsk, setCancelAsk] = useState(null); // {activity, dateIso, late}
-      const [modeTab, setModeTab] = useState(CURRENT_PARTICIPANT_MODE === "one_on_one" ? "one_on_one" : "program");
-      const showModeTabs = CURRENT_PARTICIPANT_MODE === "both";
+      const myMode = sessionMode();
+      const [modeTab, setModeTab] = useState(myMode === "one_on_one" ? "one_on_one" : "program");
+      const showModeTabs = myMode === "both";
 
       useEffect(() => { saveBookings(bookings); }, [bookings]);
 
@@ -948,6 +1016,13 @@
         const dateIso = dayIso(dayIdx);
         const existing = bookings[dateIso] || [];
         if (existing.some(b => b.activityId === activity.id)) return;
+
+        // Enforce the per-day cap (was only cosmetic before).
+        const activeCount = existing.filter(b => b.status === "pending" || b.status === "confirmed").length;
+        if (activeCount >= MAX_SESSIONS_PER_DAY) {
+          showToast(`You can pick up to ${MAX_SESSIONS_PER_DAY} activities a day.`);
+          return;
+        }
 
         const conflictBk = findConflict(existing, activity);
         if (conflictBk) {
@@ -976,6 +1051,8 @@
       // Tap × on a booked card → maybe late-cancel modal
       const requestRemove = (activityId, dayIdx) => {
         const dateIso = dayIso(dayIdx);
+        // A locked week is genuinely locked now — no silent removals.
+        if (weekLocked) { showToast("This week is locked — tap Chat to ask us to change it."); return; }
         const activity = ACTIVITIES.find(a => a.id === activityId);
         if (isLateCancel(dateIso) && !activity?.practitioner_led) {
           setCancelAsk({ activity, dateIso, late: true });
@@ -998,10 +1075,12 @@
           return { ...prev, [dateIso]: list.filter(b => b.activityId !== activityId) };
         });
         setCancelAsk(null);
+        // Sync cancellation/late-cancel to staff (after state commits to localStorage).
+        if (DB && DB.pushBookings) setTimeout(() => DB.pushBookings(), 120);
       };
 
       const totalSessions = Object.values(bookings).flat().filter(b => b.status === "pending" || b.status === "confirmed").length;
-      const activeMode = showModeTabs ? modeTab : CURRENT_PARTICIPANT_MODE;
+      const activeMode = showModeTabs ? modeTab : myMode;
       const availableForDay = useMemo(() => {
         if (!selectedDay) return [];
         return ACTIVITIES.filter(a =>
@@ -1131,7 +1210,7 @@
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
                     {availableForDay.map(act => {
                       const alreadyBooked = dayBookings(selectedDay).some(b => b.activityId === act.id && (b.status === "pending" || b.status === "confirmed"));
-                      const blockLabel = BLOCKS.find(b => b.id === act.start_block)?.label || act.time;
+                      const blockLabel = blockRangeLabel(act);
                       const disabled = alreadyBooked || weekLocked;
                       return (
                         <div key={act.id} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", border: alreadyBooked ? `2.5px solid ${act.color}` : "2.5px solid transparent", display: "flex", alignItems: "center", gap: 14, transition: "all 0.2s" }}>
@@ -1162,7 +1241,7 @@
             {/* Save CTA */}
             {!selectedDay && (
               <button
-                onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); setTimeout(() => onSaved && onSaved(), 700); } }}
+                onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); if (DB && DB.pushBookings) DB.pushBookings(); setTimeout(() => onSaved && onSaved(), 700); } }}
                 style={{ width: "100%", background: totalSessions > 0 ? "var(--gradient)" : "#ebebeb", color: totalSessions > 0 ? "#fff" : "#aaa", border: "none", borderRadius: 18, padding: "18px", fontSize: 19, cursor: totalSessions > 0 ? "pointer" : "not-allowed", marginTop: 4, marginBottom: 32, boxShadow: totalSessions > 0 ? "var(--shadow-warm)" : "none", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em" }}
               >
                 {totalSessions > 0 ? `Save My Week ✨  (${totalSessions} session${totalSessions !== 1 ? "s" : ""})` : "What do you want to do this week?"}
@@ -1177,7 +1256,7 @@
                 <div style={{ fontSize: 56, marginBottom: 8 }}>{confirm.activity.emoji}</div>
                 <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>Add {confirm.activity.name}?</h2>
                 <p style={{ color: "#666", fontSize: 15, margin: "0 0 22px" }}>
-                  {DAY_FULL[selectedDay - 1]} · {BLOCKS.find(b => b.id === confirm.activity.start_block)?.label}
+                  {DAY_FULL[selectedDay - 1]} · {blockRangeLabel(confirm.activity)}
                 </p>
                 <div style={{ display: "flex", gap: 10 }}>
                   <button onClick={() => setConfirm(null)} style={{ flex: 1, background: "#f0f0f0", color: "#666", border: "none", borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: "pointer", minHeight: 56 }}>Cancel</button>
@@ -1222,6 +1301,96 @@
     }
 
     // ============================================================
+    // LOADING / CONSENT / LOGIN
+    // ============================================================
+    function FullCenter({ children }) {
+      return (
+        <div style={{ minHeight: "100vh", background: "var(--gradient)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          {children}
+        </div>
+      );
+    }
+
+    function LoadingScreen() {
+      return (
+        <FullCenter>
+          <div style={{ textAlign: "center", color: "#fff" }}>
+            <div className="bebas" style={{ fontSize: 48, lineHeight: 0.9 }}>MOSAIC</div>
+            <div style={{ marginTop: 14, fontSize: 14, opacity: 0.85 }}>Loading…</div>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    function ConsentGate({ onAgree }) {
+      return (
+        <FullCenter>
+          <div className="route-enter" style={{ background: "#fff", borderRadius: 24, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 20px 60px rgba(26,10,0,0.35)" }}>
+            <h1 className="lilita" style={{ fontSize: 28, color: "var(--dark)", margin: "0 0 12px" }}>Your privacy 💛</h1>
+            <p style={{ fontSize: 15, color: "#444", lineHeight: 1.6, marginBottom: 12 }}>
+              Mosaic Elite Health uses this app to help support you. We store the activities you choose
+              and the things you tell us about yourself so your support team can plan around you.
+            </p>
+            <p style={{ fontSize: 15, color: "#444", lineHeight: 1.6, marginBottom: 20 }}>
+              Only Mosaic staff who support you can see your information. We never sell it. You can ask
+              us to change or delete it at any time.
+            </p>
+            <button onClick={onAgree} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: "var(--shadow-warm)" }}>
+              I understand &amp; agree
+            </button>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    function Login({ onLoggedIn }) {
+      const live = DB && DB.ENABLED;
+      const [code, setCode] = useState("");
+      const [pin, setPin] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState("");
+
+      const submit = async () => {
+        setErr(""); setBusy(true);
+        try {
+          await DB.auth.participantLogin(code, pin);
+          onLoggedIn();
+        } catch (e) {
+          setErr(e.message || "Could not log in.");
+        } finally { setBusy(false); }
+      };
+
+      const field = { width: "100%", padding: 16, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 12 };
+
+      return (
+        <FullCenter>
+          <div className="route-enter" style={{ background: "#fff", borderRadius: 24, padding: 28, maxWidth: 380, width: "100%", boxShadow: "0 20px 60px rgba(26,10,0,0.35)", textAlign: "center" }}>
+            <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 84, height: 84, objectFit: "contain", marginBottom: 8 }} />
+            <div className="bebas" style={{ fontSize: 34, color: "var(--deep-red)", lineHeight: 0.9 }}>MOSAIC</div>
+            <div className="label-cap" style={{ color: "#999", marginBottom: 20 }}>Community Hub</div>
+
+            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Your code" autoCapitalize="none" autoCorrect="off" style={field} />
+            <input value={pin} onChange={e => setPin(e.target.value)} placeholder="PIN" type="password" inputMode="numeric" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
+
+            {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+
+            <button onClick={submit} disabled={busy || !code} style={{ width: "100%", background: busy || !code ? "#ebebeb" : "var(--gradient)", color: busy || !code ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: busy || !code ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: busy || !code ? "none" : "var(--shadow-warm)" }}>
+              {busy ? "Logging in…" : "Log in"}
+            </button>
+
+            {!live && (
+              <div style={{ marginTop: 14, fontSize: 13, color: "#888", lineHeight: 1.5 }}>
+                Demo mode — enter any code and PIN to explore.
+              </div>
+            )}
+
+            <a href="admin.html" style={{ display: "inline-block", marginTop: 18, fontSize: 13, color: "#999", textDecoration: "none", fontWeight: 600 }}>Staff sign in →</a>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    // ============================================================
     // ROOT APP
     // ============================================================
     function hasAnyBookings() {
@@ -1230,22 +1399,40 @@
     }
 
     function App() {
+      const [boot, setBoot] = useState("loading"); // loading | ready
+      const [consent, setConsent] = useState(() => DB && DB.flags.consentGiven());
+      const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
       const [started, setStarted] = useState(() => !!localStorage.getItem(STORAGE_STARTED));
       const [route, setRoute] = useState(() => hasAnyBookings() ? "summary" : "scheduler");
 
-      const start = () => {
-        try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {}
-        setStarted(true);
-      };
+      // Boot: wait for the data layer (restores Supabase session + loads activities).
+      useEffect(() => {
+        let alive = true;
+        (async () => {
+          if (DB && DB.ready) { try { await DB.ready; } catch (e) {} }
+          if (DB) setSessionState(DB.auth.session);
+          await initActivities();
+          if (alive) setBoot("ready");
+        })();
+        const off = DB && DB.auth.onChange(s => alive && setSessionState(s));
+        return () => { alive = false; off && off(); };
+      }, []);
 
-      if (!started) return <Splash onStart={start} />;
+      const start = () => { try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {} setStarted(true); };
+      const onLoggedIn = () => { setSessionState(DB.auth.session); setRoute(hasAnyBookings() ? "summary" : "scheduler"); };
+      const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setStarted(false); };
+
+      if (boot === "loading") return <LoadingScreen />;
+      if (!consent) return <ConsentGate onAgree={() => { DB && DB.flags.giveConsent(); setConsent(true); }} />;
+      if (!session) return <Login onLoggedIn={onLoggedIn} />;
+      if (!started) return <Splash onStart={start} name={session.name} />;
 
       const onChat = route === "sms";
       return (
         <div style={{ paddingBottom: onChat ? 0 : 80 }}>
           {route === "summary"   && <WeekSummary    onEdit={() => setRoute("scheduler")} />}
           {route === "scheduler" && <Scheduler      onSaved={() => setRoute("summary")} />}
-          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} />}
+          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} onLogout={logout} />}
           {route === "service"   && <ServiceRequest onBack={() => setRoute("summary")} />}
           {route === "sms"       && <ChatScreen     onBack={() => setRoute("summary")} />}
           {!onChat && <BottomNav active={route} go={setRoute} />}
@@ -1255,6 +1442,11 @@
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(<App />);
+
+    // PWA: register the service worker for offline + home-screen install.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+    }
   </script>
 </body>
 </html>
