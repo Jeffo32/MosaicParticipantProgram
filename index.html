@@ -2,12 +2,27 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
   <title>Mosaic Elite Health</title>
+
+  <!-- PWA / home-screen -->
+  <meta name="theme-color" content="#E83000" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mosaic" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="icons/favicon-32.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Backend (Supabase) — degrades to demo/localStorage when config.js is blank -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="config.js"></script>
+  <script src="js/db.js"></script>
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Inter+Tight:wght@500;600;700;800&display=swap" rel="stylesheet">
@@ -85,7 +100,10 @@
     const STORAGE_REQUESTS = "mosaic_service_requests_v1";
     const STORAGE_SMS = "mosaic_sms_queue_v1";
     const STORAGE_CHAT = "mosaic_chat_v1";
-    const LATE_CANCEL_CUTOFF_DAYS = 4; // org_settings.late_cancel_cutoff_days
+    const CFG = window.MOSAIC_CONFIG || {};
+    const DB = window.MosaicDB;
+    const LATE_CANCEL_CUTOFF_DAYS = CFG.LATE_CANCEL_CUTOFF_DAYS || 4; // org_settings.late_cancel_cutoff_days
+    const MAX_SESSIONS_PER_DAY = CFG.MAX_SESSIONS_PER_DAY || 2;
 
     // 3-hour blocks. Spec: 9-12, 12-3, 3-6, 6-9
     const BLOCKS = [
@@ -100,7 +118,9 @@
     // mode: 'program' | 'one_on_one' | 'both' (feature 05)
     // practitioner_led: skip late-cancel charge (feature 08)
     // bring_money: amount appended to night-before SMS (feature 10)
-    const ACTIVITIES = [
+    // `let` (not const): replaced at runtime with staff-managed activities
+    // from Supabase when the backend is configured (see initActivities()).
+    let ACTIVITIES = [
       // ===== Kept (updated days/times) =====
       { id: 1,  emoji: "🍳", name: "Lifestyle Cooking", days: [1],    start_block: 1, end_block: 2, time: "9am – 3pm",  category: "Capacity Building",       color: "#E8913A", mode: "program", location: "Lakes" },
       { id: 2,  emoji: "🎣", name: "Cast a Line",       days: [4],    start_block: 2, end_block: 2, time: "12pm – 3pm", category: "Community Participation", color: "#4A90D9", mode: "program", location: "Lakes", bring_money: 20 },
@@ -141,8 +161,10 @@
     const DAY_FULL  = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
     // TODO(owner): spec says Mon–Sun. Prototype is Mon–Fri. Extend if/when owner OKs design change.
 
-    // TODO(owner): wire participant mode from auth. Default 'both' for prototype so tabs show.
-    const CURRENT_PARTICIPANT_MODE = "both";
+    // Participant identity comes from the logged-in session (set by db.js).
+    // In demo mode there is one local participant; name falls back to profile.
+    const sessionName = () => (DB && DB.auth.session && DB.auth.session.name) || loadProfile().name || "";
+    const sessionMode = () => (DB && DB.auth.session && DB.auth.session.mode) || "both";
 
     // ============================================================
     // STORAGE HELPERS
@@ -221,10 +243,47 @@
       });
     }
 
+    // Human label for an activity's full time span (start block → end block).
+    // Fixes the old bug where a 9am–3pm session displayed only "9am – 12pm".
+    function blockRangeLabel(act) {
+      const s = BLOCKS.find(b => b.id === act.start_block);
+      const e = BLOCKS.find(b => b.id === act.end_block);
+      if (!s) return act.time || "";
+      if (!e || e.id === s.id) return s.label;
+      return s.label.split(" – ")[0] + " – " + e.label.split(" – ")[1];
+    }
+
+    // Load activities from Supabase (if configured); otherwise keep built-ins.
+    async function initActivities(onReady) {
+      try {
+        const list = DB && DB.activities && (await DB.activities.list());
+        if (list && list.length) ACTIVITIES = list;
+      } catch (e) { /* keep built-ins */ }
+      onReady && onReady();
+    }
+
+    // ── Away helpers ──
+    // Expand a list of {start,end} periods into a Set of ISO date strings.
+    function expandAway(periods) {
+      const set = new Set();
+      (periods || []).forEach(p => {
+        const s = new Date((p.start || p.start_date) + "T12:00:00");
+        const e = new Date((p.end || p.end_date || p.start || p.start_date) + "T12:00:00");
+        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) set.add(d.toISOString().slice(0, 10));
+      });
+      return set;
+    }
+    const fmtAway = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+    function fmtAwayRange(p) {
+      const s = p.start || p.start_date, e = p.end || p.end_date;
+      return (!e || e === s) ? fmtAway(s) : fmtAway(s) + " → " + fmtAway(e);
+    }
+
     // ============================================================
     // SPLASH (unchanged design)
     // ============================================================
-    function Splash({ onStart }) {
+    function Splash({ onStart, name }) {
+      const first = (name || "").trim().split(" ")[0];
       return (
         <div className="route-enter" style={{
           minHeight: "100vh", background: "var(--gradient)", position: "relative", overflow: "hidden",
@@ -240,7 +299,7 @@
             <div className="bebas" style={{ fontSize: 56, lineHeight: 0.9, color: "#fff", marginBottom: 4 }}>MOSAIC</div>
             <div className="label-cap" style={{ color: "rgba(255,255,255,0.85)", marginBottom: 32 }}>Elite Health Community Hub</div>
             <h1 className="lilita" style={{ fontSize: 38, margin: "0 0 8px", lineHeight: 1.1, color: "#fff" }}>
-              Hey Trey! 👋
+              {first ? `Hey ${first}! 👋` : "Hey there! 👋"}
             </h1>
             <p style={{ fontSize: 16, color: "rgba(255,255,255,0.92)", margin: "0 0 44px", fontWeight: 500 }}>
               Ready to pick your activities for the week?
@@ -354,12 +413,17 @@
       { value: 5, label: "Always" }
     ];
 
-    function AboutMe({ onBack }) {
+    function AboutMe({ onBack, onLogout, onAway, onboarding, onFinish, scale, onScale }) {
       const [profile, setProfile] = useState(loadProfile);
       const [saved, setSaved] = useState(false);
 
       const update = (field, value) => setProfile(p => ({ ...p, [field]: value }));
-      const save = () => { saveProfile(profile); setSaved(true); setTimeout(() => setSaved(false), 2000); };
+      const save = () => {
+        // Writes locally AND syncs to Supabase when configured.
+        if (DB && DB.pushProfile) DB.pushProfile(profile); else saveProfile(profile);
+        if (onboarding) { onFinish && onFinish(); return; }
+        setSaved(true); setTimeout(() => setSaved(false), 2000);
+      };
 
       // Cycle a "likes" item through: null → "like" → "dislike" → null
       const cycleLike = (item) => setProfile(p => {
@@ -481,9 +545,39 @@
 
       return (
         <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
-          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>About Me</h1>
-          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Help us get to know you. Tap items to mark them, star your top 3 in each section.</p>
+          {!onboarding && <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>}
+          {onboarding && <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 6 }}>Welcome to Mosaic 👋</div>}
+          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>{onboarding ? "Let's set up your profile" : "About Me"}</h1>
+          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Help us get to know you. Tap items to mark them, star your top 3 in each section.{onboarding ? " You can change this anytime in the Me tab." : ""}</p>
+
+          {!onboarding && onAway && (
+            <button onClick={onAway} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: "#fff", border: "2px solid var(--peach)", borderRadius: 16, padding: "14px 16px", cursor: "pointer", textAlign: "left", marginBottom: 18, boxShadow: "var(--shadow-card)" }}>
+              <span style={{ fontSize: 26 }}>✈️</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontWeight: 800, fontSize: 16, color: "var(--dark)" }}>I'll be away</span>
+                <span style={{ display: "block", fontSize: 13, color: "#777" }}>Tell us the days you can't come in</span>
+              </span>
+              <span style={{ color: "#ccc", fontSize: 20 }}>›</span>
+            </button>
+          )}
+
+          {/* Text size (magnification) — stacked so it never overflows when zoomed up */}
+          {!onboarding && onScale && (
+            <div style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", boxShadow: "var(--shadow-card)", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                <span style={{ fontSize: 22 }}>🔎</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 800, fontSize: 16 }}>Text size</div>
+                  <div style={{ fontSize: 13, color: "#777" }}>Make everything bigger or smaller</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button aria-label="Smaller" onClick={() => onScale(scale - 0.1)} disabled={scale <= 0.9} style={{ flex: 1, background: scale <= 0.9 ? "#f0f0f0" : "var(--gradient)", color: scale <= 0.9 ? "#bbb" : "#fff", border: "none", borderRadius: 12, height: 52, fontSize: 26, fontWeight: 800, cursor: scale <= 0.9 ? "default" : "pointer", lineHeight: 1 }}>−</button>
+                <div style={{ minWidth: 64, textAlign: "center", fontWeight: 800, fontSize: 17, fontVariantNumeric: "tabular-nums" }}>{Math.round((scale || 1) * 100)}%</div>
+                <button aria-label="Bigger" onClick={() => onScale(scale + 0.1)} disabled={scale >= 1.6} style={{ flex: 1, background: scale >= 1.6 ? "#f0f0f0" : "var(--gradient)", color: scale >= 1.6 ? "#bbb" : "#fff", border: "none", borderRadius: 12, height: 52, fontSize: 26, fontWeight: 800, cursor: scale >= 1.6 ? "default" : "pointer", lineHeight: 1 }}>+</button>
+              </div>
+            </div>
+          )}
 
           {/* Name & date */}
           <div style={{ marginBottom: 16 }}>
@@ -545,8 +639,84 @@
           })}
 
           <button onClick={save} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 18, padding: 18, fontSize: 19, cursor: "pointer", boxShadow: "var(--shadow-warm)", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em", marginTop: 24 }}>
-            {saved ? "Saved ✓" : "Save"}
+            {onboarding ? "Save & continue →" : (saved ? "Saved ✓" : "Save")}
           </button>
+
+          {onLogout && !onboarding && (
+            <button onClick={onLogout} style={{ width: "100%", background: "none", color: "#999", border: "none", padding: 16, fontSize: 14, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
+              Log out
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // AWAY MANAGER — participant tells staff when they'll be away
+    // ============================================================
+    function AwayManager({ onBack }) {
+      const [list, setList] = useState(null);
+      const [start, setStart] = useState("");
+      const [end, setEnd] = useState("");
+      const [note, setNote] = useState("");
+      const [err, setErr] = useState("");
+      const [busy, setBusy] = useState(false);
+
+      const load = async () => { const l = DB && DB.away ? await DB.away.list() : []; setList(l || []); };
+      useEffect(() => { load(); }, []);
+
+      const add = async () => {
+        setErr("");
+        if (!start) { setErr("Pick a start date."); return; }
+        if (end && end < start) { setErr("The end date can't be before the start date."); return; }
+        setBusy(true);
+        await DB.away.add(start, end || start, note.trim());
+        setStart(""); setEnd(""); setNote("");
+        await load(); setBusy(false);
+      };
+      const remove = async (id) => { await DB.away.remove(id); load(); };
+
+      const inputStyle = { width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
+      const upcoming = (list || []).slice().sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+      return (
+        <div className="route-enter" style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
+          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>I'll be away ✈️</h1>
+          <p style={{ color: "#666", fontSize: 15, marginBottom: 20 }}>Let us know the days you won't be coming in — one day, or a range. Your team will see it.</p>
+
+          <div style={{ background: "#fff", borderRadius: 18, padding: 18, boxShadow: "var(--shadow-card)", marginBottom: 22 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>From</label>
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>To <span style={{ color: "#aaa", fontWeight: 500 }}>(leave blank for one day)</span></label>
+            <input type="date" value={end} min={start || undefined} onChange={e => setEnd(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Note <span style={{ color: "#aaa", fontWeight: 500 }}>(optional)</span></label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. family holiday" style={{ ...inputStyle, marginBottom: 14 }} />
+            {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+            <button onClick={add} disabled={busy || !start} style={{ width: "100%", background: busy || !start ? "#ebebeb" : "var(--gradient)", color: busy || !start ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 17, fontWeight: 800, cursor: busy || !start ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif" }}>
+              {busy ? "Saving…" : "Add away time"}
+            </button>
+          </div>
+
+          <h2 className="label-cap" style={{ color: "var(--flame)", marginBottom: 10 }}>Your away days</h2>
+          {list === null ? (
+            <div style={{ textAlign: "center", color: "#bbb", padding: 20 }}>Loading…</div>
+          ) : upcoming.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#aaa", padding: "28px 20px", fontSize: 15 }}>None yet — you're all in! 🎉</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {upcoming.map(p => (
+                <div key={p.id} style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", boxShadow: "var(--shadow-card)", display: "flex", alignItems: "center", gap: 12, borderLeft: "5px solid var(--amber)" }}>
+                  <div style={{ fontSize: 24 }}>✈️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtAwayRange(p)}</div>
+                    {p.note && <div style={{ fontSize: 13, color: "#777", marginTop: 2 }}>{p.note}</div>}
+                  </div>
+                  <button aria-label="Remove" onClick={() => remove(p.id)} style={{ background: "rgba(232,48,0,0.1)", color: "var(--deep-red)", border: "none", borderRadius: 10, width: 40, height: 40, fontSize: 16, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -569,16 +739,14 @@
       const [submitted, setSubmitted] = useState(false);
 
       const submit = () => {
-        const all = loadRequests();
-        all.push({
-          id: Date.now(),
-          type: picked.type,
-          detail,
-          status: "open",
-          created_at: new Date().toISOString(),
-        });
-        saveRequests(all);
-        // TODO(supabase): also email admin/health lead via serverless route.
+        // Persists locally + (when live) to Supabase and pings staff via /api/notify.
+        if (DB && DB.createServiceRequest) {
+          DB.createServiceRequest(picked.type, detail);
+        } else {
+          const all = loadRequests();
+          all.push({ id: Date.now(), type: picked.type, detail, status: "open", created_at: new Date().toISOString() });
+          saveRequests(all);
+        }
         setSubmitted(true);
       };
 
@@ -634,11 +802,19 @@
     // ============================================================
     // WEEK SUMMARY — shown after Save, and as the landing view on return.
     // ============================================================
-    function WeekSummary({ onEdit }) {
+    function WeekSummary({ onEdit, onAway }) {
       const [weekOffset, setWeekOffset] = useState(0);
+      const [awaySet, setAwaySet] = useState(() => new Set());
       const bookings = loadBookings();
       const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
       const weekLabel = `${fmt(weekDates[0])} – ${fmt(weekDates[4])}`;
+
+      useEffect(() => {
+        let alive = true;
+        (async () => { if (DB && DB.away) { const l = await DB.away.list(); if (alive) setAwaySet(expandAway(l)); } })();
+        return () => { alive = false; };
+      }, []);
+      const awayThisWeek = weekDates.filter(d => awaySet.has(isoKey(d)));
 
       const dayItems = (date) => {
         const list = (bookings[isoKey(date)] || []).filter(b => b.status === "pending" || b.status === "confirmed");
@@ -668,9 +844,24 @@
 
           <div style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
             <h1 className="lilita" style={{ fontSize: 34, margin: "0 0 4px", color: "var(--dark)", lineHeight: 1.1 }}>Your week 🗓️</h1>
-            <p style={{ color: "#666", fontSize: 15, marginBottom: 22 }}>
+            <p style={{ color: "#666", fontSize: 15, marginBottom: 16 }}>
               {totalSessions === 0 ? "Nothing booked yet." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} planned.`}
             </p>
+
+            {awayThisWeek.length > 0 && (
+              <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 14, color: "var(--dark)", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>✈️</span>
+                You're marked away on {awayThisWeek.map(d => fmt(d)).join(", ")}.
+              </div>
+            )}
+
+            {onAway && (
+              <button onClick={onAway} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "2px solid var(--peach)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", textAlign: "left", marginBottom: 20, boxShadow: "var(--shadow-card)" }}>
+                <span style={{ fontSize: 20 }}>✈️</span>
+                <span style={{ flex: 1, fontWeight: 700, fontSize: 15 }}>Going to be away?</span>
+                <span style={{ color: "var(--deep-red)", fontWeight: 800, fontSize: 13 }}>Let us know ›</span>
+              </button>
+            )}
 
             {weekDates.map((date, i) => {
               const items = dayItems(date);
@@ -682,7 +873,7 @@
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     {items.map(({ activity: act, activityId }) => {
-                      const blockLabel = BLOCKS.find(b => b.id === act.start_block)?.label || act.time;
+                      const blockLabel = blockRangeLabel(act);
                       return (
                         <div key={activityId} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", display: "flex", alignItems: "center", gap: 14, borderLeft: `5px solid ${act.color}` }}>
                           <div style={{ width: 52, height: 52, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, flexShrink: 0 }}>{act.emoji}</div>
@@ -721,7 +912,7 @@
     // WOULD be sent so the owner can sanity-check copy before wiring Twilio.
     // ============================================================
     function buildSmsForBooking(participantName, activity, dateIso) {
-      const blockLabel = BLOCKS.find(b => b.id === activity.start_block)?.label || activity.time;
+      const blockLabel = blockRangeLabel(activity);
       let msg = `Tomorrow: ${participantName} wants to ${activity.name} from ${blockLabel}.`;
       if (activity.bring_money) {
         msg += ` You'll need to bring $${activity.bring_money} — Mosaic doesn't pay for client lunches.`;
@@ -735,7 +926,7 @@
     }
 
     function seedChat() {
-      const participantName = "Trey";
+      const participantName = (sessionName().trim().split(" ")[0]) || "there";
       const bookings = loadBookings();
       const tomorrow = new Date();
       tomorrow.setDate(tomorrow.getDate() + 1);
@@ -766,11 +957,29 @@
     }
 
     function ChatScreen({ onBack }) {
+      const live = DB && DB.ENABLED;
       const [messages, setMessages] = useState(() => loadChat() || seedChat());
       const [draft, setDraft] = useState("");
+      const [undoId, setUndoId] = useState(null); // last sent msg that can be unsent
       const scrollerRef = React.useRef(null);
+      const undoTimer = React.useRef(null);
+      const replyTimer = React.useRef(null);
+      useEffect(() => () => { clearTimeout(undoTimer.current); clearTimeout(replyTimer.current); }, []);
 
-      useEffect(() => { saveChat(messages); }, [messages]);
+      // Live mode: pull the real thread + poll for staff replies.
+      useEffect(() => {
+        if (!live) return;
+        let alive = true;
+        const refresh = async () => {
+          const m = await DB.listMessages();
+          if (alive && m) setMessages(m.length ? m : seedChat());
+        };
+        refresh();
+        const t = setInterval(refresh, 6000);
+        return () => { alive = false; clearInterval(t); };
+      }, [live]);
+
+      useEffect(() => { if (!live) saveChat(messages); }, [messages, live]);
       useEffect(() => {
         if (scrollerRef.current) scrollerRef.current.scrollTop = scrollerRef.current.scrollHeight;
       }, [messages]);
@@ -778,16 +987,33 @@
       const send = () => {
         const text = draft.trim();
         if (!text) return;
-        setMessages(m => [...m, { id: Date.now(), from: "me", at: new Date().toISOString(), text }]);
+        const mid = Date.now();
+        setMessages(m => [...m, { id: mid, from: "me", at: new Date().toISOString(), text }]);
         setDraft("");
-        // TODO(supabase): post to messages table; trigger worker notification.
-        // Auto-reply stub so the chat feels alive in prototype.
-        setTimeout(() => {
-          setMessages(m => [...m, {
-            id: Date.now() + 1, from: "them", at: new Date().toISOString(),
-            text: "Thanks! We'll get back to you soon 💛"
-          }]);
-        }, 900);
+        // Allow "unsend" for a short window after sending.
+        setUndoId(mid);
+        clearTimeout(undoTimer.current);
+        undoTimer.current = setTimeout(() => setUndoId(null), 10000);
+        if (live) {
+          // Adopt the real server id so undo can delete the right row.
+          DB.sendMessage(text).then(res => {
+            if (res && res.id) { setMessages(m => m.map(x => x.id === mid ? { ...x, id: res.id } : x)); setUndoId(cur => cur === mid ? res.id : cur); }
+          });
+          return;
+        }
+        // Demo mode: friendly auto-reply stub so the chat feels alive.
+        clearTimeout(replyTimer.current);
+        replyTimer.current = setTimeout(() => {
+          setMessages(m => [...m, { id: Date.now() + 1, from: "them", at: new Date().toISOString(), text: "Thanks! We'll get back to you soon 💛" }]);
+        }, 1500);
+      };
+
+      const undoSend = (id) => {
+        setMessages(m => m.filter(x => x.id !== id));
+        setUndoId(null);
+        clearTimeout(undoTimer.current);
+        clearTimeout(replyTimer.current); // cancel the demo auto-reply too
+        if (live && DB.deleteMessage) DB.deleteMessage(id);
       };
 
       const onKey = (e) => {
@@ -841,6 +1067,11 @@
                     <div style={{ fontSize: 10, color: "#999", margin: "4px 8px 2px", fontWeight: 600 }}>
                       {fmtTime(msg.at)}
                     </div>
+                  )}
+                  {mine && msg.id === undoId && (
+                    <button onClick={() => undoSend(msg.id)} style={{ background: "none", border: "none", color: "var(--deep-red)", fontSize: 13, fontWeight: 800, cursor: "pointer", margin: "0 8px 2px", padding: "2px 0" }}>
+                      Undo send ↩
+                    </button>
                   )}
                 </div>
               );
@@ -922,8 +1153,16 @@
       const [confirm, setConfirm] = useState(null);    // {activity, dateIso, anchor}
       const [conflict, setConflict] = useState(null);  // {existingActivity, candidateActivity}
       const [cancelAsk, setCancelAsk] = useState(null); // {activity, dateIso, late}
-      const [modeTab, setModeTab] = useState(CURRENT_PARTICIPANT_MODE === "one_on_one" ? "one_on_one" : "program");
-      const showModeTabs = CURRENT_PARTICIPANT_MODE === "both";
+      const [awaySet, setAwaySet] = useState(() => new Set());
+      const myMode = sessionMode();
+      const [modeTab, setModeTab] = useState(myMode === "one_on_one" ? "one_on_one" : "program");
+
+      useEffect(() => {
+        let alive = true;
+        (async () => { if (DB && DB.away) { const l = await DB.away.list(); if (alive) setAwaySet(expandAway(l)); } })();
+        return () => { alive = false; };
+      }, []);
+      const showModeTabs = myMode === "both";
 
       useEffect(() => { saveBookings(bookings); }, [bookings]);
 
@@ -934,7 +1173,8 @@
       const dayIso = (dayIdx) => isoKey(weekDates[dayIdx - 1]);
       const dayBookings = (dayIdx) => bookings[dayIso(dayIdx)] || [];
 
-      const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+      // Toast supports an optional inline action (e.g. Undo). Longer dwell when actionable.
+      const showToast = (msg, action) => { setToast({ msg, action }); setTimeout(() => setToast(null), action ? 5500 : 3200); };
 
       const showStar = (anchor) => {
         if (!anchor) return;
@@ -948,6 +1188,16 @@
         const dateIso = dayIso(dayIdx);
         const existing = bookings[dateIso] || [];
         if (existing.some(b => b.activityId === activity.id)) return;
+
+        // Gentle heads-up if they marked themselves away that day (still allowed).
+        if (awaySet.has(dateIso)) showToast("Heads up — you said you'd be away this day.");
+
+        // Enforce the per-day cap (was only cosmetic before).
+        const activeCount = existing.filter(b => b.status === "pending" || b.status === "confirmed").length;
+        if (activeCount >= MAX_SESSIONS_PER_DAY) {
+          showToast(`You can pick up to ${MAX_SESSIONS_PER_DAY} activities a day.`);
+          return;
+        }
 
         const conflictBk = findConflict(existing, activity);
         if (conflictBk) {
@@ -971,11 +1221,15 @@
         }));
         showStar(anchor);
         setConfirm(null);
+        // Instant undo for accidental adds — removes the just-added booking, no charge.
+        showToast(`Added ${activity.name} ✓`, { label: "Undo", fn: () => doRemove(activity.id, dateIso, false) });
       };
 
       // Tap × on a booked card → maybe late-cancel modal
       const requestRemove = (activityId, dayIdx) => {
         const dateIso = dayIso(dayIdx);
+        // A locked week is genuinely locked now — no silent removals.
+        if (weekLocked) { showToast("This week is locked — tap Chat to ask us to change it."); return; }
         const activity = ACTIVITIES.find(a => a.id === activityId);
         if (isLateCancel(dateIso) && !activity?.practitioner_led) {
           setCancelAsk({ activity, dateIso, late: true });
@@ -998,10 +1252,12 @@
           return { ...prev, [dateIso]: list.filter(b => b.activityId !== activityId) };
         });
         setCancelAsk(null);
+        // Sync cancellation/late-cancel to staff (after state commits to localStorage).
+        if (DB && DB.pushBookings) setTimeout(() => DB.pushBookings(), 120);
       };
 
       const totalSessions = Object.values(bookings).flat().filter(b => b.status === "pending" || b.status === "confirmed").length;
-      const activeMode = showModeTabs ? modeTab : CURRENT_PARTICIPANT_MODE;
+      const activeMode = showModeTabs ? modeTab : myMode;
       const availableForDay = useMemo(() => {
         if (!selectedDay) return [];
         return ACTIVITIES.filter(a =>
@@ -1031,8 +1287,16 @@
           )}
 
           {toast && (
-            <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", borderRadius: 18, padding: "14px 28px", zIndex: 100, boxShadow: "0 4px 24px rgba(0,0,0,0.25)", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap" }}>
-              {toast}
+            <div style={{ position: "fixed", bottom: 96, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", borderRadius: 18, padding: "12px 16px 12px 22px", zIndex: 100, boxShadow: "0 4px 24px rgba(0,0,0,0.25)", fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 14, maxWidth: "calc(100vw - 32px)" }}>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{toast.msg}</span>
+              {toast.action && (
+                <button
+                  onClick={() => { toast.action.fn(); setToast(null); }}
+                  style={{ background: "var(--amber)", color: "var(--dark)", border: "none", borderRadius: 12, padding: "8px 16px", fontSize: 14, fontWeight: 800, cursor: "pointer", flexShrink: 0, minHeight: 40 }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
             </div>
           )}
 
@@ -1090,11 +1354,13 @@
                 const bks = dayBookings(d).filter(b => b.status === "pending" || b.status === "confirmed");
                 const isSelected = selectedDay === d;
                 const slots = Math.max(0, 2 - bks.length);
+                const away = awaySet.has(isoKey(date));
                 return (
-                  <div key={d} onClick={() => setSelectedDay(isSelected ? null : d)} style={{ background: "#fff", border: isSelected ? "2.5px solid var(--deep-red)" : "2px solid #eee", borderRadius: 16, padding: "10px 6px", cursor: "pointer", boxShadow: isSelected ? "0 4px 16px rgba(232,48,0,0.22)" : "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.2s", minHeight: 110 }}>
+                  <div key={d} onClick={() => setSelectedDay(isSelected ? null : d)} style={{ background: away ? "var(--peach)" : "#fff", border: isSelected ? "2.5px solid var(--deep-red)" : (away ? "2px solid var(--amber)" : "2px solid #eee"), borderRadius: 16, padding: "10px 6px", cursor: "pointer", boxShadow: isSelected ? "0 4px 16px rgba(232,48,0,0.22)" : "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.2s", minHeight: 110 }}>
                     <div style={{ textAlign: "center", marginBottom: 8 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: isSelected ? "var(--deep-red)" : "#aaa", textTransform: "uppercase" }}>{DAY_NAMES[d - 1]}</div>
                       <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a1a" }}>{date.getDate()}</div>
+                      {away && <div title="You're away" style={{ fontSize: 11, marginTop: 1 }}>✈️</div>}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {bks.map(bk => {
@@ -1103,7 +1369,7 @@
                         return (
                           <div key={bk.activityId} style={{ background: act.color + "22", border: `1px solid ${act.color}66`, borderRadius: 8, padding: "4px 5px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <span style={{ fontSize: 14 }}>{act.emoji}</span>
-                            <button onClick={e => { e.stopPropagation(); requestRemove(bk.activityId, d); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#bbb", padding: 0 }}>✕</button>
+                            <button aria-label="Remove" onClick={e => { e.stopPropagation(); requestRemove(bk.activityId, d); }} style={{ background: "rgba(232,48,0,0.1)", border: "none", cursor: "pointer", fontSize: 13, lineHeight: 1, color: "var(--deep-red)", fontWeight: 800, width: 22, height: 22, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
                           </div>
                         );
                       })}
@@ -1131,8 +1397,7 @@
                   <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
                     {availableForDay.map(act => {
                       const alreadyBooked = dayBookings(selectedDay).some(b => b.activityId === act.id && (b.status === "pending" || b.status === "confirmed"));
-                      const blockLabel = BLOCKS.find(b => b.id === act.start_block)?.label || act.time;
-                      const disabled = alreadyBooked || weekLocked;
+                      const blockLabel = blockRangeLabel(act);
                       return (
                         <div key={act.id} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", border: alreadyBooked ? `2.5px solid ${act.color}` : "2.5px solid transparent", display: "flex", alignItems: "center", gap: 14, transition: "all 0.2s" }}>
                           <div style={{ width: 56, height: 56, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>{act.emoji}</div>
@@ -1144,13 +1409,25 @@
                             </div>
                             <span style={{ background: act.color + "20", color: act.color, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, marginTop: 5, display: "inline-block" }}>{act.category}</span>
                           </div>
-                          <button
-                            onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)}
-                            disabled={disabled}
-                            style={{ background: alreadyBooked ? "#f5f5f5" : (weekLocked ? "#ddd" : "var(--deep-red)"), color: alreadyBooked ? "#888" : (weekLocked ? "#999" : "#fff"), border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 700, fontSize: 14, cursor: disabled ? "default" : "pointer", flexShrink: 0, minWidth: 80, minHeight: 56 }}
-                          >
-                            {alreadyBooked ? "✓ Added" : (weekLocked ? "🔒" : "+ Add")}
-                          </button>
+                          {alreadyBooked ? (
+                            // Added → one clear tap to remove (no hunting for a tiny ✕).
+                            <button
+                              onClick={() => requestRemove(act.id, selectedDay)}
+                              disabled={weekLocked}
+                              style={{ background: weekLocked ? "#f0f0f0" : "#FFEBEE", color: weekLocked ? "#999" : "var(--deep-red)", border: weekLocked ? "none" : "2px solid #FFCDD2", borderRadius: 14, padding: "12px 14px", fontWeight: 800, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.2 }}
+                            >
+                              <span style={{ fontSize: 12, color: weekLocked ? "#999" : "#27AE60", fontWeight: 700 }}>✓ Added</span>
+                              <span>{weekLocked ? "🔒" : "Undo ↩"}</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)}
+                              disabled={weekLocked}
+                              style={{ background: weekLocked ? "#ddd" : "var(--deep-red)", color: weekLocked ? "#999" : "#fff", border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 700, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56 }}
+                            >
+                              {weekLocked ? "🔒" : "+ Add"}
+                            </button>
+                          )}
                         </div>
                       );
                     })}
@@ -1162,7 +1439,7 @@
             {/* Save CTA */}
             {!selectedDay && (
               <button
-                onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); setTimeout(() => onSaved && onSaved(), 700); } }}
+                onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); if (DB && DB.pushBookings) DB.pushBookings(); setTimeout(() => onSaved && onSaved(), 700); } }}
                 style={{ width: "100%", background: totalSessions > 0 ? "var(--gradient)" : "#ebebeb", color: totalSessions > 0 ? "#fff" : "#aaa", border: "none", borderRadius: 18, padding: "18px", fontSize: 19, cursor: totalSessions > 0 ? "pointer" : "not-allowed", marginTop: 4, marginBottom: 32, boxShadow: totalSessions > 0 ? "var(--shadow-warm)" : "none", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em" }}
               >
                 {totalSessions > 0 ? `Save My Week ✨  (${totalSessions} session${totalSessions !== 1 ? "s" : ""})` : "What do you want to do this week?"}
@@ -1177,7 +1454,7 @@
                 <div style={{ fontSize: 56, marginBottom: 8 }}>{confirm.activity.emoji}</div>
                 <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>Add {confirm.activity.name}?</h2>
                 <p style={{ color: "#666", fontSize: 15, margin: "0 0 22px" }}>
-                  {DAY_FULL[selectedDay - 1]} · {BLOCKS.find(b => b.id === confirm.activity.start_block)?.label}
+                  {DAY_FULL[selectedDay - 1]} · {blockRangeLabel(confirm.activity)}
                 </p>
                 <div style={{ display: "flex", gap: 10 }}>
                   <button onClick={() => setConfirm(null)} style={{ flex: 1, background: "#f0f0f0", color: "#666", border: "none", borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: "pointer", minHeight: 56 }}>Cancel</button>
@@ -1222,6 +1499,122 @@
     }
 
     // ============================================================
+    // LOADING / CONSENT / LOGIN
+    // ============================================================
+    function FullCenter({ children }) {
+      return (
+        <div style={{ minHeight: "100vh", background: "var(--gradient)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+          {children}
+        </div>
+      );
+    }
+
+    function LoadingScreen() {
+      return (
+        <FullCenter>
+          <div style={{ textAlign: "center", color: "#fff" }}>
+            <div className="bebas" style={{ fontSize: 48, lineHeight: 0.9 }}>MOSAIC</div>
+            <div style={{ marginTop: 14, fontSize: 14, opacity: 0.85 }}>Loading…</div>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    function ConsentGate({ onAgree }) {
+      return (
+        <FullCenter>
+          <div className="route-enter" style={{ background: "#fff", borderRadius: 24, padding: 28, maxWidth: 400, width: "100%", boxShadow: "0 20px 60px rgba(26,10,0,0.35)" }}>
+            <h1 className="lilita" style={{ fontSize: 28, color: "var(--dark)", margin: "0 0 12px" }}>Your privacy 💛</h1>
+            <p style={{ fontSize: 15, color: "#444", lineHeight: 1.6, marginBottom: 12 }}>
+              Mosaic Elite Health uses this app to help support you. We store the activities you choose
+              and the things you tell us about yourself so your support team can plan around you.
+            </p>
+            <p style={{ fontSize: 15, color: "#444", lineHeight: 1.6, marginBottom: 20 }}>
+              Only Mosaic staff who support you can see your information. We never sell it. You can ask
+              us to change or delete it at any time.
+            </p>
+            <button onClick={onAgree} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: "var(--shadow-warm)" }}>
+              I understand &amp; agree
+            </button>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    function Login({ onLoggedIn }) {
+      const live = DB && DB.ENABLED;
+      const [code, setCode] = useState("");
+      const [pin, setPin] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [err, setErr] = useState("");
+
+      const submit = async () => {
+        setErr(""); setBusy(true);
+        try {
+          await DB.auth.participantLogin(code, pin);
+          onLoggedIn();
+        } catch (e) {
+          setErr(e.message || "Could not log in.");
+        } finally { setBusy(false); }
+      };
+
+      const field = { width: "100%", padding: 16, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", boxSizing: "border-box", marginBottom: 12 };
+
+      return (
+        <FullCenter>
+          <div className="route-enter" style={{ background: "#fff", borderRadius: 24, padding: 28, maxWidth: 380, width: "100%", boxShadow: "0 20px 60px rgba(26,10,0,0.35)", textAlign: "center" }}>
+            <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 84, height: 84, objectFit: "contain", marginBottom: 8 }} />
+            <div className="bebas" style={{ fontSize: 34, color: "var(--deep-red)", lineHeight: 0.9 }}>MOSAIC</div>
+            <div className="label-cap" style={{ color: "#999", marginBottom: 20 }}>Community Hub</div>
+
+            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Your code" autoCapitalize="none" autoCorrect="off" style={field} />
+            <input value={pin} onChange={e => setPin(e.target.value)} placeholder="PIN" type="password" inputMode="numeric" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
+
+            {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+
+            <button onClick={submit} disabled={busy || !code} style={{ width: "100%", background: busy || !code ? "#ebebeb" : "var(--gradient)", color: busy || !code ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: busy || !code ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: busy || !code ? "none" : "var(--shadow-warm)" }}>
+              {busy ? "Logging in…" : "Log in"}
+            </button>
+
+            {!live && (
+              <div style={{ marginTop: 14, fontSize: 13, color: "#888", lineHeight: 1.5 }}>
+                Demo mode — enter any code and PIN to explore.
+              </div>
+            )}
+
+            <a href="admin.html" style={{ display: "inline-block", marginTop: 18, fontSize: 13, color: "#999", textDecoration: "none", fontWeight: 600 }}>Staff sign in →</a>
+          </div>
+        </FullCenter>
+      );
+    }
+
+    // ============================================================
+    // ONBOARDING — short first-run. Just a name; the full About Me
+    // form lives in the Me tab and can be filled anytime.
+    // ============================================================
+    function Onboarding({ onFinish }) {
+      const [name, setName] = useState(() => (loadProfile().name || sessionName() || ""));
+      const save = () => {
+        const prof = { ...loadProfile(), name: name.trim() };
+        if (DB && DB.pushProfile) DB.pushProfile(prof); else saveProfile(prof);
+        onFinish && onFinish();
+      };
+      return (
+        <div className="route-enter" style={{ minHeight: "100vh", background: "var(--gradient)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", textAlign: "center", color: "#fff" }}>
+          <div style={{ width: "100%", maxWidth: 360 }}>
+            <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 110, height: 110, objectFit: "contain", marginBottom: 8 }} />
+            <div className="bebas" style={{ fontSize: 46, lineHeight: 0.9 }}>MOSAIC</div>
+            <h1 className="lilita" style={{ fontSize: 30, margin: "20px 0 8px" }}>Welcome! 👋</h1>
+            <p style={{ fontSize: 16, opacity: 0.92, marginBottom: 24 }}>What should we call you?</p>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" onKeyDown={e => { if (e.key === "Enter" && name.trim()) save(); }} style={{ width: "100%", padding: 16, borderRadius: 14, border: "none", fontSize: 16, fontFamily: "inherit", textAlign: "center", marginBottom: 16, boxSizing: "border-box" }} />
+            <button onClick={save} disabled={!name.trim()} style={{ width: "100%", background: "#fff", color: "var(--deep-red)", border: "none", borderRadius: 999, padding: "16px 24px", fontSize: 20, fontFamily: "'Lilita One', system-ui, sans-serif", cursor: name.trim() ? "pointer" : "default", opacity: name.trim() ? 1 : 0.6, boxShadow: "0 12px 32px rgba(0,0,0,0.25)", minHeight: 56 }}>Let's go 🙌</button>
+            <p style={{ fontSize: 13, opacity: 0.8, marginTop: 20 }}>You can tell us more about yourself anytime in the Me tab.</p>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
     // ROOT APP
     // ============================================================
     function hasAnyBookings() {
@@ -1230,31 +1623,72 @@
     }
 
     function App() {
+      const [boot, setBoot] = useState("loading"); // loading | ready
+      const [consent, setConsent] = useState(() => DB && DB.flags.consentGiven());
+      const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
+      const [onboarded, setOnboarded] = useState(() => DB && DB.flags.onboarded());
       const [started, setStarted] = useState(() => !!localStorage.getItem(STORAGE_STARTED));
+      const [scale, setScale] = useState(() => (DB ? DB.flags.scale() : 1.1));
       const [route, setRoute] = useState(() => hasAnyBookings() ? "summary" : "scheduler");
 
-      const start = () => {
-        try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {}
-        setStarted(true);
+      // Apply the user's magnification to the whole app. `zoom` reflows
+      // (unlike transform), so bigger UI still fits the screen width.
+      useEffect(() => {
+        const r = document.getElementById("root");
+        if (r) r.style.zoom = String(scale);
+      }, [scale]);
+      const onScale = (n) => {
+        const v = Math.round(Math.min(1.6, Math.max(0.9, n)) * 100) / 100;
+        if (DB) DB.flags.setScale(v);
+        setScale(v);
       };
 
-      if (!started) return <Splash onStart={start} />;
+      // Boot: wait for the data layer (restores Supabase session + loads activities).
+      useEffect(() => {
+        let alive = true;
+        (async () => {
+          if (DB && DB.ready) { try { await DB.ready; } catch (e) {} }
+          if (DB) setSessionState(DB.auth.session);
+          await initActivities();
+          if (alive) setBoot("ready");
+        })();
+        const off = DB && DB.auth.onChange(s => alive && setSessionState(s));
+        return () => { alive = false; off && off(); };
+      }, []);
+
+      const start = () => { try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {} setStarted(true); };
+      const onLoggedIn = () => { setSessionState(DB.auth.session); setOnboarded(DB.flags.onboarded()); setRoute(hasAnyBookings() ? "summary" : "scheduler"); };
+      const finishOnboarding = () => { DB && DB.flags.markOnboarded(); DB && DB.flags.markStarted(); setOnboarded(true); setStarted(true); setRoute("scheduler"); };
+      const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setOnboarded(false); setStarted(false); };
+
+      if (boot === "loading") return <LoadingScreen />;
+      if (!consent) return <ConsentGate onAgree={() => { DB && DB.flags.giveConsent(); setConsent(true); }} />;
+      if (!session) return <Login onLoggedIn={onLoggedIn} />;
+      // First open → short welcome (name only). Full profile lives in the Me tab.
+      if (!onboarded) return <Onboarding onFinish={finishOnboarding} />;
+      if (!started) return <Splash onStart={start} name={session.name} />;
 
       const onChat = route === "sms";
       return (
         <div style={{ paddingBottom: onChat ? 0 : 80 }}>
-          {route === "summary"   && <WeekSummary    onEdit={() => setRoute("scheduler")} />}
+          {route === "summary"   && <WeekSummary    onEdit={() => setRoute("scheduler")} onAway={() => setRoute("away")} />}
           {route === "scheduler" && <Scheduler      onSaved={() => setRoute("summary")} />}
-          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} />}
+          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} onLogout={logout} onAway={() => setRoute("away")} scale={scale} onScale={onScale} />}
+          {route === "away"      && <AwayManager    onBack={() => setRoute("about")} />}
           {route === "service"   && <ServiceRequest onBack={() => setRoute("summary")} />}
           {route === "sms"       && <ChatScreen     onBack={() => setRoute("summary")} />}
-          {!onChat && <BottomNav active={route} go={setRoute} />}
+          {!onChat && <BottomNav active={route === "away" ? "about" : route} go={setRoute} />}
         </div>
       );
     }
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
     root.render(<App />);
+
+    // PWA: register the service worker for offline + home-screen install.
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => { navigator.serviceWorker.register("sw.js").catch(() => {}); });
+    }
   </script>
 </body>
 </html>
