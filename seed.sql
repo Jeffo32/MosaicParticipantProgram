@@ -8,7 +8,7 @@
 insert into activities (name, emoji, color, category, day_of_week, start_block, end_block, mode, notes, practitioner_led, bring_money_amount)
 select * from (values
   -- name,                               emoji,  color,     category,                  dow, sb, eb, mode,          location,     pract, money
-  ('Lifestyle Cooking',                  '🍳', '#E8913A', 'Capacity Building',          1, 1, 2, 'program',     'Lakes',      false, null::numeric),
+  ('Lifestyle Cooking',                  '🍳', '#E8913A', 'Capacity Building',          1, 1, 2, 'program'::participant_mode, 'Lakes', false, null::numeric),
   ('Music',                              '🎵', '#8E44AD', 'Creative Expression',        1, 1, 2, 'program',     'Lakes',      false, null),
   ('Art',                                '🖌️', '#E74C3C', 'Creative Expression',        1, 1, 2, 'program',     'Lakes',      false, null),
   ('Digital Design',                     '💻', '#16A085', 'Capacity Building',          1, 1, 2, 'program',     'Lakes',      false, null),
