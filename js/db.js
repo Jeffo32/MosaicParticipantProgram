@@ -126,6 +126,24 @@
       setSession(null);
     },
 
+    // ---- staff password reset / change ----
+    sendPasswordReset: async function (email, redirectTo) {
+      if (!ENABLED) return { ok: true, demo: true };
+      var r = await sb.auth.resetPasswordForEmail((email || "").trim(), redirectTo ? { redirectTo: redirectTo } : undefined);
+      if (r.error) throw r.error; return { ok: true };
+    },
+    updatePassword: async function (newPassword) {
+      if (!ENABLED) return { ok: true, demo: true };
+      var r = await sb.auth.updateUser({ password: newPassword });
+      if (r.error) throw r.error; return { ok: true };
+    },
+    // Fires cb() when the user arrives via a password-recovery email link.
+    onRecovery: function (cb) {
+      if (!ENABLED || !sb) return function () {};
+      var sub = sb.auth.onAuthStateChange(function (event) { if (event === "PASSWORD_RECOVERY") { try { cb(); } catch (e) {} } });
+      return function () { try { sub.data.subscription.unsubscribe(); } catch (e) {} };
+    },
+
     // Re-hydrate a Supabase session on page load (token may have refreshed).
     restore: async function () {
       if (!ENABLED || !sb) return session;
@@ -416,8 +434,37 @@
       },
 
       listWorkers: async function () {
-        var r = await sb.from("profiles").select("id, display_name").in("role", ["worker", "manager", "admin"]).order("display_name");
+        var r = await sb.from("profiles").select("id, display_name, role").in("role", ["worker", "manager", "admin"]).order("display_name");
         if (r.error) throw r.error; return r.data;
+      },
+
+      // ---- worker <-> participant assignments (per-worker scoping) ----
+      getAssignments: async function (participantId) {
+        var r = await sb.from("assignments").select("id, worker_id, active_from, active_to").eq("participant_id", participantId);
+        if (r.error) throw r.error;
+        var today = _todayIso();
+        return r.data.filter(function (a) { return !a.active_to || a.active_to >= today; });
+      },
+      addAssignment: async function (participantId, workerId) {
+        var r = await sb.from("assignments").insert({ participant_id: participantId, worker_id: workerId, active_from: _todayIso() }).select().single();
+        if (r.error) throw r.error; return r.data;
+      },
+      removeAssignment: async function (id) {
+        var r = await sb.from("assignments").delete().eq("id", id);
+        if (r.error) throw r.error; return true;
+      },
+
+      // ---- admin resets a participant's PIN (server-side, service role) ----
+      resetParticipantPin: async function (participantId, pin) {
+        var token = (await sb.auth.getSession()).data.session.access_token;
+        var resp = await fetch("/api/admin-set-pin", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+          body: JSON.stringify({ id: participantId, pin: pin }),
+        });
+        var body = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(body.error || "Could not reset PIN.");
+        return true;
       },
 
       getAway: async function (participantId) {

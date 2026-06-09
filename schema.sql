@@ -191,6 +191,12 @@ create or replace function worker_assigned_to(p_id uuid) returns boolean languag
   );
 $$;
 
+-- Can the current staff user touch this participant's data?
+-- Admins/managers: yes (everyone). Workers: only their assigned participants.
+create or replace function staff_can(p_id uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select is_admin() or worker_assigned_to(p_id);
+$$;
+
 -- Verify a participant PIN (used by the serverless login function via service role).
 -- Returns the participant uuid on success, null otherwise.
 create or replace function verify_participant_pin(p_code text, p_pin text)
@@ -222,24 +228,25 @@ alter table notifications_log enable row level security;
 alter table org_settings      enable row level security;
 
 -- profiles
+-- profiles: self, admins (everyone), workers (their assigned participants only)
 drop policy if exists profiles_read on profiles;
-create policy profiles_read on profiles for select using (id = auth.uid() or is_staff());
+create policy profiles_read on profiles for select using (id = auth.uid() or staff_can(id));
 drop policy if exists profiles_update on profiles;
 create policy profiles_update on profiles for update using (id = auth.uid() or is_admin());
 
 -- participants
 drop policy if exists participants_read on participants;
-create policy participants_read on participants for select using (id = auth.uid() or is_staff() or worker_assigned_to(id));
+create policy participants_read on participants for select using (id = auth.uid() or staff_can(id));
 drop policy if exists participants_update on participants;
-create policy participants_update on participants for update using (id = auth.uid() or is_admin());
+create policy participants_update on participants for update using (id = auth.uid() or staff_can(id));
 
 -- workers
 drop policy if exists workers_read on workers;
 create policy workers_read on workers for select using (id = auth.uid() or is_staff());
 
--- assignments
+-- assignments (worker sees own; admins manage all)
 drop policy if exists assignments_read on assignments;
-create policy assignments_read on assignments for select using (worker_id = auth.uid() or participant_id = auth.uid() or is_staff());
+create policy assignments_read on assignments for select using (worker_id = auth.uid() or participant_id = auth.uid() or is_admin());
 drop policy if exists assignments_write on assignments;
 create policy assignments_write on assignments for all using (is_admin()) with check (is_admin());
 
@@ -249,43 +256,43 @@ create policy activities_read on activities for select using (auth.uid() is not 
 drop policy if exists activities_write on activities;
 create policy activities_write on activities for all using (is_admin()) with check (is_admin());
 
--- bookings (participant owns theirs; assigned worker can read/update; staff full)
+-- bookings (participant owns theirs; assigned worker/admin manage)
 drop policy if exists bookings_read on bookings;
-create policy bookings_read on bookings for select using (participant_id = auth.uid() or worker_id = auth.uid() or worker_assigned_to(participant_id) or is_staff());
+create policy bookings_read on bookings for select using (participant_id = auth.uid() or worker_id = auth.uid() or staff_can(participant_id));
 drop policy if exists bookings_insert on bookings;
-create policy bookings_insert on bookings for insert with check (participant_id = auth.uid() or is_staff());
+create policy bookings_insert on bookings for insert with check (participant_id = auth.uid() or staff_can(participant_id));
 drop policy if exists bookings_update on bookings;
-create policy bookings_update on bookings for update using (participant_id = auth.uid() or is_staff()) with check (participant_id = auth.uid() or is_staff());
+create policy bookings_update on bookings for update using (participant_id = auth.uid() or staff_can(participant_id)) with check (participant_id = auth.uid() or staff_can(participant_id));
 drop policy if exists bookings_delete on bookings;
-create policy bookings_delete on bookings for delete using (participant_id = auth.uid() or is_staff());
+create policy bookings_delete on bookings for delete using (participant_id = auth.uid() or staff_can(participant_id));
 
 -- service_requests
 drop policy if exists service_read on service_requests;
-create policy service_read on service_requests for select using (participant_id = auth.uid() or is_staff());
+create policy service_read on service_requests for select using (participant_id = auth.uid() or staff_can(participant_id));
 drop policy if exists service_write on service_requests;
 create policy service_write on service_requests for insert with check (participant_id = auth.uid());
 drop policy if exists service_staff_update on service_requests;
-create policy service_staff_update on service_requests for update using (is_staff()) with check (is_staff());
+create policy service_staff_update on service_requests for update using (staff_can(participant_id)) with check (staff_can(participant_id));
 
--- away_periods (participant manages own; staff manage all)
+-- away_periods (participant manages own; assigned worker/admin manage)
 drop policy if exists away_read on away_periods;
-create policy away_read on away_periods for select using (participant_id = auth.uid() or is_staff() or worker_assigned_to(participant_id));
+create policy away_read on away_periods for select using (participant_id = auth.uid() or staff_can(participant_id));
 drop policy if exists away_self_write on away_periods;
 create policy away_self_write on away_periods for all using (participant_id = auth.uid()) with check (participant_id = auth.uid());
 drop policy if exists away_staff_write on away_periods;
-create policy away_staff_write on away_periods for all using (is_staff()) with check (is_staff());
+create policy away_staff_write on away_periods for all using (staff_can(participant_id)) with check (staff_can(participant_id));
 
 -- messages
 drop policy if exists messages_read on messages;
-create policy messages_read on messages for select using (participant_id = auth.uid() or is_staff() or worker_assigned_to(participant_id));
+create policy messages_read on messages for select using (participant_id = auth.uid() or staff_can(participant_id));
 drop policy if exists messages_participant_insert on messages;
 create policy messages_participant_insert on messages for insert with check (participant_id = auth.uid() and sender = 'participant');
 drop policy if exists messages_staff_insert on messages;
-create policy messages_staff_insert on messages for insert with check (is_staff() and sender = 'staff');
+create policy messages_staff_insert on messages for insert with check (staff_can(participant_id) and sender = 'staff');
 drop policy if exists messages_participant_delete on messages;
 create policy messages_participant_delete on messages for delete using (participant_id = auth.uid() and sender = 'participant');
 drop policy if exists messages_staff_delete on messages;
-create policy messages_staff_delete on messages for delete using (is_staff());
+create policy messages_staff_delete on messages for delete using (staff_can(participant_id));
 
 -- notifications_log: staff only
 drop policy if exists notif_staff on notifications_log;

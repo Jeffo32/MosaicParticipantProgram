@@ -97,6 +97,10 @@
       getParticipant: async () => ({ id:"demo", display_name:demoName(), phone:"", mode:"both", about_me: lsGet("mosaic_profile_v1",{}) }),
       createParticipant: async () => { throw new Error("Connect Supabase to add real participants."); },
       deleteParticipant: async () => { throw new Error("Connect Supabase to delete participants."); },
+      getAssignments: async () => [],
+      addAssignment: async () => { throw new Error("Connect Supabase to assign workers."); },
+      removeAssignment: async () => { throw new Error("Connect Supabase to assign workers."); },
+      resetParticipantPin: async () => { throw new Error("Connect Supabase to reset PINs."); },
       listServiceRequests: async (status) => {
         let all = lsGet("mosaic_service_requests_v1", []);
         if (status) all = all.filter(r => r.status === status);
@@ -143,17 +147,26 @@
     };
 
     const A = LIVE ? DB.admin : LocalAdmin;
+    const myRole = () => (LIVE && DB.auth.session ? DB.auth.session.role : "admin");
+    const isAdmin = () => ["admin", "manager"].includes(myRole());
 
     // ============================================================
     // STAFF LOGIN (live only)
     // ============================================================
     function StaffLogin({ onLoggedIn }) {
       const [email,setEmail]=useState(""); const [pwd,setPwd]=useState("");
-      const [busy,setBusy]=useState(false); const [err,setErr]=useState("");
+      const [busy,setBusy]=useState(false); const [err,setErr]=useState(""); const [note,setNote]=useState("");
       const submit = async () => {
         setErr(""); setBusy(true);
         try { await DB.auth.staffLogin(email, pwd); onLoggedIn(); }
         catch(e){ setErr(e.message || "Could not sign in."); } finally { setBusy(false); }
+      };
+      const forgot = async () => {
+        const e = (email||"").trim() || (prompt("Enter your email to reset your password:")||"").trim();
+        if (!e) return;
+        setErr(""); setNote("");
+        try { await DB.auth.sendPasswordReset(e, location.origin + "/admin"); setNote("If that email is registered, a reset link is on its way. Check your inbox."); }
+        catch(err){ setErr(err.message); }
       };
       return (
         <div style={{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", padding:24 }}>
@@ -163,8 +176,40 @@
             <input className="field" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" autoCapitalize="none" type="email" />
             <input className="field" value={pwd} onChange={e=>setPwd(e.target.value)} placeholder="Password" type="password" onKeyDown={e=>{ if(e.key==="Enter") submit(); }} />
             {err && <div style={{ color:"var(--deep-red)", fontSize:14, fontWeight:600, marginBottom:10 }}>{err}</div>}
+            {note && <div style={{ color:"#27AE60", fontSize:13, fontWeight:600, marginBottom:10 }}>{note}</div>}
             <button className="btnP" style={{ width:"100%" }} disabled={busy} onClick={submit}>{busy?"Signing in…":"Sign in"}</button>
-            <a href="index.html" style={{ display:"inline-block", marginTop:16, fontSize:13, color:"#999", textDecoration:"none", fontWeight:600 }}>← Participant app</a>
+            <div style={{ display:"flex", justifyContent:"space-between", marginTop:16 }}>
+              <a href="index.html" style={{ fontSize:13, color:"#999", textDecoration:"none", fontWeight:600 }}>← Participant app</a>
+              <button onClick={forgot} style={{ background:"none", border:"none", fontSize:13, color:"#999", fontWeight:600, cursor:"pointer" }}>Forgot password?</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    function SetPassword({ title, intro, onDone, onCancel }) {
+      const [pw,setPw]=useState(""); const [pw2,setPw2]=useState(""); const [busy,setBusy]=useState(false); const [err,setErr]=useState("");
+      const save = async ()=>{
+        setErr("");
+        if (pw.length < 8) { setErr("Use at least 8 characters."); return; }
+        if (pw !== pw2) { setErr("Those two don't match."); return; }
+        setBusy(true);
+        try { await DB.auth.updatePassword(pw); onDone(); }
+        catch(e){ setErr(e.message); setBusy(false); }
+      };
+      const modal = !!onCancel;
+      return (
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", padding:24, ...(modal ? { position:"fixed", inset:0, background:"rgba(26,10,0,0.5)", zIndex:200 } : { minHeight:"100vh" }) }}>
+          <div className="card" style={{ padding:28, maxWidth:380, width:"100%" }}>
+            <h3 className="lilita" style={{ fontSize:24, marginBottom:6 }}>{title || "Set a new password"}</h3>
+            {intro && <p style={{ fontSize:14, color:"#777", marginBottom:14 }}>{intro}</p>}
+            <input className="field" type="password" placeholder="New password" value={pw} onChange={e=>setPw(e.target.value)} />
+            <input className="field" type="password" placeholder="Confirm new password" value={pw2} onChange={e=>setPw2(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") save(); }} />
+            {err && <div style={{ color:"var(--deep-red)", fontSize:14, fontWeight:600, marginBottom:10 }}>{err}</div>}
+            <div style={{ display:"flex", gap:8 }}>
+              {modal && <button className="btnS" style={{ flex:1 }} onClick={onCancel}>Cancel</button>}
+              <button className="btnP" style={{ flex:2 }} disabled={busy} onClick={save}>{busy?"Saving…":"Save password"}</button>
+            </div>
           </div>
         </div>
       );
@@ -361,7 +406,23 @@
 
     function ProfileView({ id, onBack, onDeleted }) {
       const [p,setP]=useState(null); const [err,setErr]=useState(""); const [away,setAway]=useState([]); const [busy,setBusy]=useState(false);
-      useEffect(()=>{ A.getParticipant(id).then(setP).catch(e=>setErr(e.message)); A.getAway(id).then(setAway).catch(()=>setAway([])); },[id]);
+      const [workers,setWorkers]=useState([]); const [assigns,setAssigns]=useState([]); const [addW,setAddW]=useState("");
+      const admin = isAdmin();
+      const loadAssign = ()=> A.getAssignments(id).then(setAssigns).catch(()=>setAssigns([]));
+      useEffect(()=>{
+        A.getParticipant(id).then(setP).catch(e=>setErr(e.message));
+        A.getAway(id).then(setAway).catch(()=>setAway([]));
+        if (admin) { A.listWorkers().then(setWorkers).catch(()=>{}); loadAssign(); }
+      },[id]);
+      const wname = (wid)=> (workers.find(w=>w.id===wid)||{}).display_name || "Worker";
+      const assign = async ()=>{ if(!addW) return; try{ await A.addAssignment(id, addW); setAddW(""); loadAssign(); }catch(e){ alert(e.message); } };
+      const unassign = async (aid)=>{ try{ await A.removeAssignment(aid); loadAssign(); }catch(e){ alert(e.message); } };
+      const resetPin = async ()=>{
+        const pin = prompt(`New PIN for ${p.display_name} (4+ digits):`);
+        if (!pin) return;
+        try { await A.resetParticipantPin(id, pin.trim()); alert(`PIN updated. ${p.display_name} now logs in with their name + ${pin.trim()}.`); }
+        catch(e){ alert(e.message); }
+      };
       const del = async ()=>{
         if (!confirm(`Delete ${p.display_name}? This removes their login, bookings, profile and messages permanently. This can't be undone.`)) return;
         setBusy(true);
@@ -370,6 +431,7 @@
       };
       if (err) return <div style={{ color:"var(--deep-red)" }}>{err}</div>;
       if (!p) return <Loading/>;
+      const assignableWorkers = workers.filter(w => !assigns.some(a => a.worker_id === w.id));
       const am = p.about_me || {};
       const intake = am.intake || {};
       const favList = (arr)=> (arr&&arr.length)? arr.join(", ") : "—";
@@ -399,6 +461,28 @@
               ))}
             </div>
           )}
+          {admin && (
+            <div className="card" style={{ padding:20, marginBottom:14 }}>
+              <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>Support team</div>
+              {assigns.length===0 ? <div style={{ fontSize:14, color:"#999", marginBottom:12 }}>No workers assigned yet — assign one so they can see this participant.</div> : (
+                <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+                  {assigns.map(a=>(
+                    <span key={a.id} style={{ display:"inline-flex", alignItems:"center", gap:8, background:"#FFF3E8", border:"1px solid var(--peach)", borderRadius:999, padding:"6px 8px 6px 14px", fontSize:14, fontWeight:700 }}>
+                      {wname(a.worker_id)}
+                      <button onClick={()=>unassign(a.id)} aria-label="Remove" style={{ background:"rgba(232,48,0,0.12)", color:"var(--deep-red)", border:"none", borderRadius:"50%", width:22, height:22, fontWeight:800, cursor:"pointer" }}>✕</button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div style={{ display:"flex", gap:8 }}>
+                <select className="field" style={{ marginBottom:0, flex:1 }} value={addW} onChange={e=>setAddW(e.target.value)}>
+                  <option value="">Assign a worker…</option>
+                  {assignableWorkers.map(w=> <option key={w.id} value={w.id}>{w.display_name}{w.role!=="worker"?` (${w.role})`:""}</option>)}
+                </select>
+                <button className="btnP" disabled={!addW} onClick={assign}>Assign</button>
+              </div>
+            </div>
+          )}
           <div className="card" style={{ padding:20 }}>
             <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>About me (self-reported)</div>
             <Row k="Top likes" v={favList(am.favoriteLikes)} />
@@ -418,9 +502,14 @@
               </>
             )}
           </div>
-          <button onClick={del} disabled={busy} style={{ width:"100%", marginTop:16, background:"#fff", color:"var(--deep-red)", border:"2px solid #FFCDD2", borderRadius:14, padding:14, fontSize:14, fontWeight:800, cursor: busy?"default":"pointer" }}>
-            {busy ? "Deleting…" : "Delete participant"}
+          <button onClick={resetPin} style={{ width:"100%", marginTop:16, background:"#fff", color:"var(--dark)", border:"1px solid var(--line)", borderRadius:14, padding:14, fontSize:14, fontWeight:800, cursor:"pointer" }}>
+            Reset PIN
           </button>
+          {admin && (
+            <button onClick={del} disabled={busy} style={{ width:"100%", marginTop:10, background:"#fff", color:"var(--deep-red)", border:"2px solid #FFCDD2", borderRadius:14, padding:14, fontSize:14, fontWeight:800, cursor: busy?"default":"pointer" }}>
+              {busy ? "Deleting…" : "Delete participant"}
+            </button>
+          )}
         </div>
       );
     }
@@ -439,7 +528,7 @@
 
       const listEl = (
         <div>
-          <button className="btnP" style={{ marginBottom:14, width: wide?"100%":undefined }} onClick={()=>setView("new")}>+ New participant</button>
+          {isAdmin() && <button className="btnP" style={{ marginBottom:14, width: wide?"100%":undefined }} onClick={()=>setView("new")}>+ New participant</button>}
           {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
           {rows===null ? <Loading/> : rows.length===0 ? <Empty>No participants yet.</Empty> : (
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
@@ -635,8 +724,10 @@
 
     function Dashboard({ onLogout }) {
       const [tab,setTab]=useState("requests");
+      const [chpw,setChpw]=useState(false);
       const wide = useIsDesktop();
       const Active = (TABS.find(t=>t.id===tab)||TABS[0]).C;
+      const pwModal = (chpw && LIVE) ? <SetPassword title="Change your password" intro="Pick something only you know — at least 8 characters." onCancel={()=>setChpw(false)} onDone={()=>{ setChpw(false); alert("Password updated."); }} /> : null;
 
       // DESKTOP / laptop — centered, contained column with a floating rounded nav bar.
       if (wide) {
@@ -655,10 +746,12 @@
                     </button>
                   ))}
                 </nav>
+                {LIVE && <button onClick={()=>setChpw(true)} style={{ background:"rgba(255,255,255,.14)", color:"#fff", border:"none", borderRadius:14, padding:"9px 14px", fontWeight:700, fontSize:13, cursor:"pointer" }}>Password</button>}
                 <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:14, padding:"9px 16px", fontWeight:700, fontSize:13, cursor:"pointer" }}>{LIVE?"Log out":"Exit"}</button>
               </header>
               <main><Active wide={true}/></main>
             </div>
+            {pwModal}
           </div>
         );
       }
@@ -671,7 +764,10 @@
               <div className="bebas" style={{ fontSize:24, lineHeight:.9 }}>MOSAIC STAFF</div>
               <div className="cap" style={{ opacity:.85 }}>{LIVE ? "Live" : "Demo mode"}</div>
             </div>
-            <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontWeight:700, fontSize:13 }}>{LIVE?"Log out":"Exit"}</button>
+            <div style={{ display:"flex", gap:8 }}>
+              {LIVE && <button onClick={()=>setChpw(true)} style={{ background:"rgba(255,255,255,.14)", color:"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontWeight:700, fontSize:13 }}>Password</button>}
+              <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontWeight:700, fontSize:13 }}>{LIVE?"Log out":"Exit"}</button>
+            </div>
           </div>
           <div style={{ padding:"18px 16px" }}><Active wide={false}/></div>
           <nav style={{ position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:"1px solid var(--line)", display:"flex", justifyContent:"space-around", padding:"6px 4px calc(6px + env(safe-area-inset-bottom))", zIndex:50 }}>
@@ -682,6 +778,7 @@
               </button>
             ))}
           </nav>
+          {pwModal}
         </div>
       );
     }
@@ -689,17 +786,23 @@
     function App() {
       const [boot,setBoot]=useState("loading");
       const [authed,setAuthed]=useState(false);
+      const [recovery,setRecovery]=useState(false);
       useEffect(()=>{
+        let off=()=>{};
         (async ()=>{
           if (!LIVE) { setAuthed(true); setBoot("ready"); return; }
+          off = DB.auth.onRecovery(() => setRecovery(true));
           if (DB.ready) { try{ await DB.ready; }catch(e){} }
           const s = DB.auth.session;
           setAuthed(!!(s && s.role && s.role!=="participant"));
           setBoot("ready");
         })();
+        return () => off();
       },[]);
       const logout = async ()=>{ if(LIVE) await DB.auth.logout(); setAuthed(false); };
       if (boot==="loading") return <div style={{ padding:60, textAlign:"center", color:"#bbb" }}>Loading…</div>;
+      // Arrived via a password-reset email link → set a new password, then sign in.
+      if (recovery) return <SetPassword title="Set a new password" intro="Choose a new password for your Mosaic staff account." onDone={async ()=>{ await DB.auth.logout(); setRecovery(false); setAuthed(false); alert("Password updated — sign in with your new password."); }} />;
       if (LIVE && !authed) return <StaffLogin onLoggedIn={()=>setAuthed(true)} />;
       return <Dashboard onLogout={logout} />;
     }
