@@ -282,6 +282,10 @@ drop policy if exists messages_participant_insert on messages;
 create policy messages_participant_insert on messages for insert with check (participant_id = auth.uid() and sender = 'participant');
 drop policy if exists messages_staff_insert on messages;
 create policy messages_staff_insert on messages for insert with check (is_staff() and sender = 'staff');
+drop policy if exists messages_participant_delete on messages;
+create policy messages_participant_delete on messages for delete using (participant_id = auth.uid() and sender = 'participant');
+drop policy if exists messages_staff_delete on messages;
+create policy messages_staff_delete on messages for delete using (is_staff());
 
 -- notifications_log: staff only
 drop policy if exists notif_staff on notifications_log;

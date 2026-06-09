@@ -31,6 +31,7 @@
     CONSENT: "mosaic_consent_v1",
     AWAY: "mosaic_away_v1",
     ONBOARDED: "mosaic_onboarded_v1",
+    SCALE: "mosaic_scale_v1",
   };
 
   // ---- tiny storage helpers ----
@@ -314,6 +315,12 @@
         return { ok: true, id: ins.data.id };
       } catch (e) { return { ok: false, error: e.message }; }
     },
+    // Unsend: participant deletes their own message (chat undo). Demo handled in UI.
+    deleteMessage: async function (id) {
+      if (!ENABLED || !session) return { ok: true, demo: true };
+      try { var d = await sb.from("messages").delete().eq("id", id); if (d.error) throw d.error; return { ok: true }; }
+      catch (e) { return { ok: false, error: e.message }; }
+    },
 
     // ============================================================
     // ADMIN / STAFF QUERIES (admin.html). Supabase only.
@@ -452,6 +459,9 @@
     // returning users — incl. on a new device after pull — skip onboarding).
     onboarded: function () { return !!ls(K.ONBOARDED, false) || !!(data._localProfile().name); },
     markOnboarded: function () { lset(K.ONBOARDED, { at: new Date().toISOString() }); },
+    // App-wide magnification (default a touch bigger than 1.0 out of the box).
+    scale: function () { var s = ls(K.SCALE, null); return (typeof s === "number" && s >= 0.8 && s <= 2) ? s : 1.1; },
+    setScale: function (n) { lset(K.SCALE, n); },
   };
 
   // ---- ready (restore Supabase session) ----
@@ -477,6 +487,7 @@
     away: { list: data.listAway, add: data.addAway, remove: data.removeAway },
     listMessages: data.listMessages,
     sendMessage: data.sendMessage,
+    deleteMessage: data.deleteMessage,
     admin: data.admin,
   };
 })();
