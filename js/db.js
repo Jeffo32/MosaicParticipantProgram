@@ -29,6 +29,8 @@
     CHAT: "mosaic_chat_v1",
     SESSION: "mosaic_session_v1",
     CONSENT: "mosaic_consent_v1",
+    AWAY: "mosaic_away_v1",
+    ONBOARDED: "mosaic_onboarded_v1",
   };
 
   // ---- tiny storage helpers ----
@@ -266,6 +268,36 @@
       }
     },
 
+    // ---------- PARTICIPANT: away periods ----------
+    listAway: async function () {
+      if (!ENABLED) return ls(K.AWAY, []);
+      if (!session || session.role !== "participant") return [];
+      var r = await sb.from("away_periods").select("id,start_date,end_date,note").eq("participant_id", session.id).order("start_date");
+      if (r.error) { console.warn("[MosaicDB] listAway", r.error); return ls(K.AWAY, []); }
+      return r.data.map(function (x) { return { id: x.id, start: x.start_date, end: x.end_date, note: x.note }; });
+    },
+    addAway: async function (start, end, note) {
+      end = end || start;
+      if (!ENABLED || !session || session.role !== "participant") {
+        var a = ls(K.AWAY, []); a.push({ id: Date.now(), start: start, end: end, note: note || "" }); lset(K.AWAY, a);
+        return { ok: true, demo: true };
+      }
+      try {
+        var ins = await sb.from("away_periods").insert({ participant_id: session.id, start_date: start, end_date: end, note: note || null }).select().single();
+        if (ins.error) throw ins.error;
+        _notify("away", { participant: session.name, start: start, end: end, note: note });
+        return { ok: true, id: ins.data.id };
+      } catch (e) { console.warn("[MosaicDB] addAway", e.message); return { ok: false, error: e.message }; }
+    },
+    removeAway: async function (id) {
+      if (!ENABLED || !session || session.role !== "participant") {
+        lset(K.AWAY, ls(K.AWAY, []).filter(function (x) { return String(x.id) !== String(id); }));
+        return { ok: true, demo: true };
+      }
+      try { var d = await sb.from("away_periods").delete().eq("id", id); if (d.error) throw d.error; return { ok: true }; }
+      catch (e) { return { ok: false, error: e.message }; }
+    },
+
     // ---------- PARTICIPANT: messages ----------
     listMessages: async function () {
       if (!ENABLED || !session || session.role !== "participant") return null;
@@ -363,6 +395,17 @@
         if (r.error) throw r.error; return r.data;
       },
 
+      getAway: async function (participantId) {
+        var r = await sb.from("away_periods").select("id, start_date, end_date, note").eq("participant_id", participantId).order("start_date");
+        if (r.error) throw r.error; return r.data;
+      },
+      listAwayForWeek: async function (mondayIso, sundayIso) {
+        var r = await sb.from("away_periods")
+          .select("id, start_date, end_date, note, participant_id, profiles!away_periods_participant_id_fkey(display_name)")
+          .lte("start_date", sundayIso).gte("end_date", mondayIso).order("start_date");
+        if (r.error) throw r.error; return r.data;
+      },
+
       listMessages: async function (participantId) {
         var r = await sb.from("messages").select("id, sender, body, created_at").eq("participant_id", participantId).order("created_at");
         if (r.error) throw r.error; return r.data;
@@ -405,6 +448,10 @@
     giveConsent: function () { lset(K.CONSENT, { at: new Date().toISOString() }); },
     hasStarted: function () { return !!localStorage.getItem(K.STARTED); },
     markStarted: function () { lset(K.STARTED, 1); },
+    // Onboarded if explicitly marked OR profile already has a name (so
+    // returning users — incl. on a new device after pull — skip onboarding).
+    onboarded: function () { return !!ls(K.ONBOARDED, false) || !!(data._localProfile().name); },
+    markOnboarded: function () { lset(K.ONBOARDED, { at: new Date().toISOString() }); },
   };
 
   // ---- ready (restore Supabase session) ----
@@ -427,6 +474,7 @@
     pushBookings: data.pushBookings,
     pushProfile: data.pushProfile,
     createServiceRequest: data.createServiceRequest,
+    away: { list: data.listAway, add: data.addAway, remove: data.removeAway },
     listMessages: data.listMessages,
     sendMessage: data.sendMessage,
     admin: data.admin,

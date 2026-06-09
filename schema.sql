@@ -137,6 +137,19 @@ create table if not exists messages (
 create index if not exists messages_thread on messages (participant_id, created_at);
 
 -- ------------------------------------------------------------
+-- 8b. AWAY PERIODS (participant tells staff when they'll be away)
+-- ------------------------------------------------------------
+create table if not exists away_periods (
+  id uuid primary key default gen_random_uuid(),
+  participant_id uuid not null references profiles(id) on delete cascade,
+  start_date date not null,
+  end_date date not null,
+  note text,
+  created_at timestamptz default now()
+);
+create index if not exists away_participant on away_periods (participant_id, start_date);
+
+-- ------------------------------------------------------------
 -- 9. NOTIFICATIONS LOG
 -- ------------------------------------------------------------
 create table if not exists notifications_log (
@@ -203,6 +216,7 @@ alter table assignments       enable row level security;
 alter table activities        enable row level security;
 alter table bookings          enable row level security;
 alter table service_requests  enable row level security;
+alter table away_periods      enable row level security;
 alter table messages          enable row level security;
 alter table notifications_log enable row level security;
 alter table org_settings      enable row level security;
@@ -252,6 +266,14 @@ drop policy if exists service_write on service_requests;
 create policy service_write on service_requests for insert with check (participant_id = auth.uid());
 drop policy if exists service_staff_update on service_requests;
 create policy service_staff_update on service_requests for update using (is_staff()) with check (is_staff());
+
+-- away_periods (participant manages own; staff manage all)
+drop policy if exists away_read on away_periods;
+create policy away_read on away_periods for select using (participant_id = auth.uid() or is_staff() or worker_assigned_to(participant_id));
+drop policy if exists away_self_write on away_periods;
+create policy away_self_write on away_periods for all using (participant_id = auth.uid()) with check (participant_id = auth.uid());
+drop policy if exists away_staff_write on away_periods;
+create policy away_staff_write on away_periods for all using (is_staff()) with check (is_staff());
 
 -- messages
 drop policy if exists messages_read on messages;

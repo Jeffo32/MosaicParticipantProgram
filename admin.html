@@ -124,6 +124,10 @@
         if (i>=0){ list[i].status = status; map[date]=list; lsSet("mosaic_bookings_v2", map);} return true;
       },
       assignWorker: async () => true,
+      getAway: async () => lsGet("mosaic_away_v1", []).map(p => ({ id:p.id, start_date:p.start, end_date:p.end||p.start, note:p.note })),
+      listAwayForWeek: async (monIso, sunIso) => lsGet("mosaic_away_v1", [])
+        .filter(p => (p.start||"") <= sunIso && (p.end||p.start||"") >= monIso)
+        .map(p => ({ id:p.id, start_date:p.start, end_date:p.end||p.start, note:p.note, participant_id:"demo", profiles:{ display_name:demoName() } })),
       listActivities: async () => ACT.map(a => ({ id:a.id, name:a.name, emoji:a.emoji, color:a.color, category:a.category, day_of_week:(a.days||[])[0], start_block:a.start_block, end_block:a.end_block, mode:a.mode, notes:a.location, bring_money_amount:a.bring_money, practitioner_led:a.practitioner_led })),
       saveActivity: async () => { throw new Error("Connect Supabase to edit activities."); },
       deleteActivity: async () => { throw new Error("Connect Supabase to edit activities."); },
@@ -232,8 +236,9 @@
       const mon = useMemo(()=>mondayOf(offset),[offset]);
       const monIso = isoOf(mon);
       const sun = new Date(mon); sun.setDate(mon.getDate()+6); const sunIso = isoOf(sun);
+      const [away,setAway]=useState([]);
       const load = useCallback(async ()=>{ setRows(null); try{ setRows(await A.listBookingsForWeek(monIso,sunIso)); }catch(e){ setErr(e.message);} },[monIso,sunIso]);
-      useEffect(()=>{ load(); },[load]);
+      useEffect(()=>{ load(); A.listAwayForWeek(monIso,sunIso).then(setAway).catch(()=>setAway([])); },[load,monIso,sunIso]);
       useEffect(()=>{ A.listWorkers().then(setWorkers).catch(()=>{}); },[]);
 
       const byDate = useMemo(()=>{ const m={}; (rows||[]).forEach(b=>{ (m[b.date]=m[b.date]||[]).push(b); }); return m; },[rows]);
@@ -252,6 +257,16 @@
             <button className="btnS" onClick={()=>setOffset(o=>o+1)}>›</button>
           </div>
           {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
+          {away.length>0 && (
+            <div className="card" style={{ padding:"12px 14px", marginBottom:14, borderLeft:"5px solid var(--amber)", background:"#FFF8EF" }}>
+              <div className="cap" style={{ color:"#B26A00", marginBottom:6 }}>✈️ Away this week</div>
+              {away.map(p=>(
+                <div key={p.id} style={{ fontSize:14, color:"#444", padding:"2px 0" }}>
+                  <b>{p.profiles?.display_name||"Participant"}</b> — {fmtDate(p.start_date)}{p.end_date&&p.end_date!==p.start_date?` → ${fmtDate(p.end_date)}`:""}{p.note?` (${p.note})`:""}
+                </div>
+              ))}
+            </div>
+          )}
           {rows===null ? <Loading/> : dates.length===0 ? <Empty>No bookings this week.</Empty> : dates.map(date=>(
             <div key={date} style={{ marginBottom:18 }}>
               <div className="cap" style={{ color:"var(--flame)", marginBottom:8 }}>{fmtDate(date)}</div>
@@ -334,8 +349,8 @@
     }
 
     function ProfileView({ id, onBack }) {
-      const [p,setP]=useState(null); const [err,setErr]=useState("");
-      useEffect(()=>{ A.getParticipant(id).then(setP).catch(e=>setErr(e.message)); },[id]);
+      const [p,setP]=useState(null); const [err,setErr]=useState(""); const [away,setAway]=useState([]);
+      useEffect(()=>{ A.getParticipant(id).then(setP).catch(e=>setErr(e.message)); A.getAway(id).then(setAway).catch(()=>setAway([])); },[id]);
       if (err) return <div style={{ color:"var(--deep-red)" }}>{err}</div>;
       if (!p) return <Loading/>;
       const am = p.about_me || {};
@@ -348,6 +363,16 @@
             <h2 className="lilita" style={{ fontSize:26 }}>{p.display_name}</h2>
             <div style={{ fontSize:14, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
           </div>
+          {away.length>0 && (
+            <div className="card" style={{ padding:16, marginBottom:14, borderLeft:"5px solid var(--amber)", background:"#FFF8EF" }}>
+              <div className="cap" style={{ color:"#B26A00", marginBottom:8 }}>✈️ Away days</div>
+              {away.map(a=>(
+                <div key={a.id} style={{ fontSize:14, color:"#444", padding:"2px 0" }}>
+                  {fmtDate(a.start_date)}{a.end_date&&a.end_date!==a.start_date?` → ${fmtDate(a.end_date)}`:""}{a.note?` — ${a.note}`:""}
+                </div>
+              ))}
+            </div>
+          )}
           <div className="card" style={{ padding:20 }}>
             <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>About me (self-reported)</div>
             <Row k="Top likes" v={favList(am.favoriteLikes)} />

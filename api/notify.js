@@ -9,6 +9,7 @@ import { sendSms, sendEmail, smsConfigured, emailConfigured } from "./_send.js";
 const COPY = {
   service_request: (p) => `Mosaic: ${p.participant || "A participant"} needs help — "${p.type}"${p.detail ? `: ${p.detail}` : ""}. Open the dashboard.`,
   message: (p) => `Mosaic: new message from ${p.participant || "a participant"} — "${(p.text || "").slice(0, 120)}"`,
+  away: (p) => `Mosaic: ${p.participant || "A participant"} will be away ${p.start}${p.end && p.end !== p.start ? ` to ${p.end}` : ""}${p.note ? ` (${p.note})` : ""}.`,
   staff_reply: () => null, // staff -> participant reply; participant push handled separately
 };
 

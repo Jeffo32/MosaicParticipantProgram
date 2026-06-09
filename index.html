@@ -262,6 +262,23 @@
       onReady && onReady();
     }
 
+    // ── Away helpers ──
+    // Expand a list of {start,end} periods into a Set of ISO date strings.
+    function expandAway(periods) {
+      const set = new Set();
+      (periods || []).forEach(p => {
+        const s = new Date((p.start || p.start_date) + "T12:00:00");
+        const e = new Date((p.end || p.end_date || p.start || p.start_date) + "T12:00:00");
+        for (let d = new Date(s); d <= e; d.setDate(d.getDate() + 1)) set.add(d.toISOString().slice(0, 10));
+      });
+      return set;
+    }
+    const fmtAway = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+    function fmtAwayRange(p) {
+      const s = p.start || p.start_date, e = p.end || p.end_date;
+      return (!e || e === s) ? fmtAway(s) : fmtAway(s) + " → " + fmtAway(e);
+    }
+
     // ============================================================
     // SPLASH (unchanged design)
     // ============================================================
@@ -396,7 +413,7 @@
       { value: 5, label: "Always" }
     ];
 
-    function AboutMe({ onBack, onLogout }) {
+    function AboutMe({ onBack, onLogout, onAway, onboarding, onFinish }) {
       const [profile, setProfile] = useState(loadProfile);
       const [saved, setSaved] = useState(false);
 
@@ -404,6 +421,7 @@
       const save = () => {
         // Writes locally AND syncs to Supabase when configured.
         if (DB && DB.pushProfile) DB.pushProfile(profile); else saveProfile(profile);
+        if (onboarding) { onFinish && onFinish(); return; }
         setSaved(true); setTimeout(() => setSaved(false), 2000);
       };
 
@@ -527,9 +545,21 @@
 
       return (
         <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
-          <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
-          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>About Me</h1>
-          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Help us get to know you. Tap items to mark them, star your top 3 in each section.</p>
+          {!onboarding && <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>}
+          {onboarding && <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 6 }}>Welcome to Mosaic 👋</div>}
+          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>{onboarding ? "Let's set up your profile" : "About Me"}</h1>
+          <p style={{ color: "#666", fontSize: 15, marginBottom: 18 }}>Help us get to know you. Tap items to mark them, star your top 3 in each section.{onboarding ? " You can change this anytime in the Me tab." : ""}</p>
+
+          {!onboarding && onAway && (
+            <button onClick={onAway} style={{ width: "100%", display: "flex", alignItems: "center", gap: 12, background: "#fff", border: "2px solid var(--peach)", borderRadius: 16, padding: "14px 16px", cursor: "pointer", textAlign: "left", marginBottom: 18, boxShadow: "var(--shadow-card)" }}>
+              <span style={{ fontSize: 26 }}>✈️</span>
+              <span style={{ flex: 1 }}>
+                <span style={{ display: "block", fontWeight: 800, fontSize: 16, color: "var(--dark)" }}>I'll be away</span>
+                <span style={{ display: "block", fontSize: 13, color: "#777" }}>Tell us the days you can't come in</span>
+              </span>
+              <span style={{ color: "#ccc", fontSize: 20 }}>›</span>
+            </button>
+          )}
 
           {/* Name & date */}
           <div style={{ marginBottom: 16 }}>
@@ -591,13 +621,83 @@
           })}
 
           <button onClick={save} style={{ width: "100%", background: "var(--gradient)", color: "#fff", border: "none", borderRadius: 18, padding: 18, fontSize: 19, cursor: "pointer", boxShadow: "var(--shadow-warm)", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em", marginTop: 24 }}>
-            {saved ? "Saved ✓" : "Save"}
+            {onboarding ? "Save & continue →" : (saved ? "Saved ✓" : "Save")}
           </button>
 
-          {onLogout && (
+          {onLogout && !onboarding && (
             <button onClick={onLogout} style={{ width: "100%", background: "none", color: "#999", border: "none", padding: 16, fontSize: 14, fontWeight: 700, cursor: "pointer", marginTop: 8 }}>
               Log out
             </button>
+          )}
+        </div>
+      );
+    }
+
+    // ============================================================
+    // AWAY MANAGER — participant tells staff when they'll be away
+    // ============================================================
+    function AwayManager({ onBack }) {
+      const [list, setList] = useState(null);
+      const [start, setStart] = useState("");
+      const [end, setEnd] = useState("");
+      const [note, setNote] = useState("");
+      const [err, setErr] = useState("");
+      const [busy, setBusy] = useState(false);
+
+      const load = async () => { const l = DB && DB.away ? await DB.away.list() : []; setList(l || []); };
+      useEffect(() => { load(); }, []);
+
+      const add = async () => {
+        setErr("");
+        if (!start) { setErr("Pick a start date."); return; }
+        if (end && end < start) { setErr("The end date can't be before the start date."); return; }
+        setBusy(true);
+        await DB.away.add(start, end || start, note.trim());
+        setStart(""); setEnd(""); setNote("");
+        await load(); setBusy(false);
+      };
+      const remove = async (id) => { await DB.away.remove(id); load(); };
+
+      const inputStyle = { width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
+      const upcoming = (list || []).slice().sort((a, b) => (a.start || "").localeCompare(b.start || ""));
+
+      return (
+        <div className="route-enter" style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
+          <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>I'll be away ✈️</h1>
+          <p style={{ color: "#666", fontSize: 15, marginBottom: 20 }}>Let us know the days you won't be coming in — one day, or a range. Your team will see it.</p>
+
+          <div style={{ background: "#fff", borderRadius: 18, padding: 18, boxShadow: "var(--shadow-card)", marginBottom: 22 }}>
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>From</label>
+            <input type="date" value={start} onChange={e => setStart(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>To <span style={{ color: "#aaa", fontWeight: 500 }}>(leave blank for one day)</span></label>
+            <input type="date" value={end} min={start || undefined} onChange={e => setEnd(e.target.value)} style={{ ...inputStyle, marginBottom: 12 }} />
+            <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Note <span style={{ color: "#aaa", fontWeight: 500 }}>(optional)</span></label>
+            <input type="text" value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. family holiday" style={{ ...inputStyle, marginBottom: 14 }} />
+            {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
+            <button onClick={add} disabled={busy || !start} style={{ width: "100%", background: busy || !start ? "#ebebeb" : "var(--gradient)", color: busy || !start ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 17, fontWeight: 800, cursor: busy || !start ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif" }}>
+              {busy ? "Saving…" : "Add away time"}
+            </button>
+          </div>
+
+          <h2 className="label-cap" style={{ color: "var(--flame)", marginBottom: 10 }}>Your away days</h2>
+          {list === null ? (
+            <div style={{ textAlign: "center", color: "#bbb", padding: 20 }}>Loading…</div>
+          ) : upcoming.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#aaa", padding: "28px 20px", fontSize: 15 }}>None yet — you're all in! 🎉</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {upcoming.map(p => (
+                <div key={p.id} style={{ background: "#fff", borderRadius: 16, padding: "14px 16px", boxShadow: "var(--shadow-card)", display: "flex", alignItems: "center", gap: 12, borderLeft: "5px solid var(--amber)" }}>
+                  <div style={{ fontSize: 24 }}>✈️</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15 }}>{fmtAwayRange(p)}</div>
+                    {p.note && <div style={{ fontSize: 13, color: "#777", marginTop: 2 }}>{p.note}</div>}
+                  </div>
+                  <button aria-label="Remove" onClick={() => remove(p.id)} style={{ background: "rgba(232,48,0,0.1)", color: "var(--deep-red)", border: "none", borderRadius: 10, width: 40, height: 40, fontSize: 16, fontWeight: 800, cursor: "pointer", flexShrink: 0 }}>✕</button>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       );
@@ -684,11 +784,19 @@
     // ============================================================
     // WEEK SUMMARY — shown after Save, and as the landing view on return.
     // ============================================================
-    function WeekSummary({ onEdit }) {
+    function WeekSummary({ onEdit, onAway }) {
       const [weekOffset, setWeekOffset] = useState(0);
+      const [awaySet, setAwaySet] = useState(() => new Set());
       const bookings = loadBookings();
       const weekDates = useMemo(() => getWeekDates(weekOffset), [weekOffset]);
       const weekLabel = `${fmt(weekDates[0])} – ${fmt(weekDates[4])}`;
+
+      useEffect(() => {
+        let alive = true;
+        (async () => { if (DB && DB.away) { const l = await DB.away.list(); if (alive) setAwaySet(expandAway(l)); } })();
+        return () => { alive = false; };
+      }, []);
+      const awayThisWeek = weekDates.filter(d => awaySet.has(isoKey(d)));
 
       const dayItems = (date) => {
         const list = (bookings[isoKey(date)] || []).filter(b => b.status === "pending" || b.status === "confirmed");
@@ -718,9 +826,24 @@
 
           <div style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
             <h1 className="lilita" style={{ fontSize: 34, margin: "0 0 4px", color: "var(--dark)", lineHeight: 1.1 }}>Your week 🗓️</h1>
-            <p style={{ color: "#666", fontSize: 15, marginBottom: 22 }}>
+            <p style={{ color: "#666", fontSize: 15, marginBottom: 16 }}>
               {totalSessions === 0 ? "Nothing booked yet." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} planned.`}
             </p>
+
+            {awayThisWeek.length > 0 && (
+              <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 14, color: "var(--dark)", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ fontSize: 18 }}>✈️</span>
+                You're marked away on {awayThisWeek.map(d => fmt(d)).join(", ")}.
+              </div>
+            )}
+
+            {onAway && (
+              <button onClick={onAway} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "2px solid var(--peach)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", textAlign: "left", marginBottom: 20, boxShadow: "var(--shadow-card)" }}>
+                <span style={{ fontSize: 20 }}>✈️</span>
+                <span style={{ flex: 1, fontWeight: 700, fontSize: 15 }}>Going to be away?</span>
+                <span style={{ color: "var(--deep-red)", fontWeight: 800, fontSize: 13 }}>Let us know ›</span>
+              </button>
+            )}
 
             {weekDates.map((date, i) => {
               const items = dayItems(date);
@@ -989,8 +1112,15 @@
       const [confirm, setConfirm] = useState(null);    // {activity, dateIso, anchor}
       const [conflict, setConflict] = useState(null);  // {existingActivity, candidateActivity}
       const [cancelAsk, setCancelAsk] = useState(null); // {activity, dateIso, late}
+      const [awaySet, setAwaySet] = useState(() => new Set());
       const myMode = sessionMode();
       const [modeTab, setModeTab] = useState(myMode === "one_on_one" ? "one_on_one" : "program");
+
+      useEffect(() => {
+        let alive = true;
+        (async () => { if (DB && DB.away) { const l = await DB.away.list(); if (alive) setAwaySet(expandAway(l)); } })();
+        return () => { alive = false; };
+      }, []);
       const showModeTabs = myMode === "both";
 
       useEffect(() => { saveBookings(bookings); }, [bookings]);
@@ -1017,6 +1147,9 @@
         const dateIso = dayIso(dayIdx);
         const existing = bookings[dateIso] || [];
         if (existing.some(b => b.activityId === activity.id)) return;
+
+        // Gentle heads-up if they marked themselves away that day (still allowed).
+        if (awaySet.has(dateIso)) showToast("Heads up — you said you'd be away this day.");
 
         // Enforce the per-day cap (was only cosmetic before).
         const activeCount = existing.filter(b => b.status === "pending" || b.status === "confirmed").length;
@@ -1180,11 +1313,13 @@
                 const bks = dayBookings(d).filter(b => b.status === "pending" || b.status === "confirmed");
                 const isSelected = selectedDay === d;
                 const slots = Math.max(0, 2 - bks.length);
+                const away = awaySet.has(isoKey(date));
                 return (
-                  <div key={d} onClick={() => setSelectedDay(isSelected ? null : d)} style={{ background: "#fff", border: isSelected ? "2.5px solid var(--deep-red)" : "2px solid #eee", borderRadius: 16, padding: "10px 6px", cursor: "pointer", boxShadow: isSelected ? "0 4px 16px rgba(232,48,0,0.22)" : "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.2s", minHeight: 110 }}>
+                  <div key={d} onClick={() => setSelectedDay(isSelected ? null : d)} style={{ background: away ? "var(--peach)" : "#fff", border: isSelected ? "2.5px solid var(--deep-red)" : (away ? "2px solid var(--amber)" : "2px solid #eee"), borderRadius: 16, padding: "10px 6px", cursor: "pointer", boxShadow: isSelected ? "0 4px 16px rgba(232,48,0,0.22)" : "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.2s", minHeight: 110 }}>
                     <div style={{ textAlign: "center", marginBottom: 8 }}>
                       <div style={{ fontSize: 10, fontWeight: 700, color: isSelected ? "var(--deep-red)" : "#aaa", textTransform: "uppercase" }}>{DAY_NAMES[d - 1]}</div>
                       <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a1a" }}>{date.getDate()}</div>
+                      {away && <div title="You're away" style={{ fontSize: 11, marginTop: 1 }}>✈️</div>}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {bks.map(bk => {
@@ -1241,7 +1376,7 @@
                               style={{ background: weekLocked ? "#f0f0f0" : "#FFEBEE", color: weekLocked ? "#999" : "var(--deep-red)", border: weekLocked ? "none" : "2px solid #FFCDD2", borderRadius: 14, padding: "12px 14px", fontWeight: 800, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.2 }}
                             >
                               <span style={{ fontSize: 12, color: weekLocked ? "#999" : "#27AE60", fontWeight: 700 }}>✓ Added</span>
-                              <span>{weekLocked ? "🔒" : "Remove ✕"}</span>
+                              <span>{weekLocked ? "🔒" : "Undo ↩"}</span>
                             </button>
                           ) : (
                             <button
@@ -1424,6 +1559,7 @@
       const [boot, setBoot] = useState("loading"); // loading | ready
       const [consent, setConsent] = useState(() => DB && DB.flags.consentGiven());
       const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
+      const [onboarded, setOnboarded] = useState(() => DB && DB.flags.onboarded());
       const [started, setStarted] = useState(() => !!localStorage.getItem(STORAGE_STARTED));
       const [route, setRoute] = useState(() => hasAnyBookings() ? "summary" : "scheduler");
 
@@ -1441,23 +1577,27 @@
       }, []);
 
       const start = () => { try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {} setStarted(true); };
-      const onLoggedIn = () => { setSessionState(DB.auth.session); setRoute(hasAnyBookings() ? "summary" : "scheduler"); };
-      const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setStarted(false); };
+      const onLoggedIn = () => { setSessionState(DB.auth.session); setOnboarded(DB.flags.onboarded()); setRoute(hasAnyBookings() ? "summary" : "scheduler"); };
+      const finishOnboarding = () => { DB && DB.flags.markOnboarded(); DB && DB.flags.markStarted(); setOnboarded(true); setStarted(true); setRoute("scheduler"); };
+      const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setOnboarded(false); setStarted(false); };
 
       if (boot === "loading") return <LoadingScreen />;
       if (!consent) return <ConsentGate onAgree={() => { DB && DB.flags.giveConsent(); setConsent(true); }} />;
       if (!session) return <Login onLoggedIn={onLoggedIn} />;
+      // First open → profile onboarding (editable later in the Me tab).
+      if (!onboarded) return <AboutMe onboarding onFinish={finishOnboarding} />;
       if (!started) return <Splash onStart={start} name={session.name} />;
 
       const onChat = route === "sms";
       return (
         <div style={{ paddingBottom: onChat ? 0 : 80 }}>
-          {route === "summary"   && <WeekSummary    onEdit={() => setRoute("scheduler")} />}
+          {route === "summary"   && <WeekSummary    onEdit={() => setRoute("scheduler")} onAway={() => setRoute("away")} />}
           {route === "scheduler" && <Scheduler      onSaved={() => setRoute("summary")} />}
-          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} onLogout={logout} />}
+          {route === "about"     && <AboutMe        onBack={() => setRoute("summary")} onLogout={logout} onAway={() => setRoute("away")} />}
+          {route === "away"      && <AwayManager    onBack={() => setRoute("about")} />}
           {route === "service"   && <ServiceRequest onBack={() => setRoute("summary")} />}
           {route === "sms"       && <ChatScreen     onBack={() => setRoute("summary")} />}
-          {!onChat && <BottomNav active={route} go={setRoute} />}
+          {!onChat && <BottomNav active={route === "away" ? "about" : route} go={setRoute} />}
         </div>
       );
     }
