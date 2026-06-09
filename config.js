@@ -11,8 +11,8 @@
 // schema.sql in Supabase, the app becomes real multi-user.
 // ============================================================
 window.MOSAIC_CONFIG = {
-  SUPABASE_URL: "",        // e.g. "https://abcd1234.supabase.co"
-  SUPABASE_ANON_KEY: "",   // e.g. "eyJhbGciOi..."
+  SUPABASE_URL: "https://utmxexdifjwdczredgih.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0bXhleGRpZmp3ZGN6cmVkZ2loIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA5OTYyMzUsImV4cCI6MjA5NjU3MjIzNX0.qx6pBcLkWBsYN-3LeQraJubAOrCdisBxJOqxZV2inHw",
 
   // Org branding / copy
   ORG_NAME: "Mosaic Elite Health",
