@@ -1565,7 +1565,9 @@
           <div className="route-enter" style={{ background: "#fff", borderRadius: 24, padding: 28, maxWidth: 380, width: "100%", boxShadow: "0 20px 60px rgba(26,10,0,0.35)", textAlign: "center" }}>
             <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 84, height: 84, objectFit: "contain", marginBottom: 8 }} />
             <div className="bebas" style={{ fontSize: 34, color: "var(--deep-red)", lineHeight: 0.9 }}>MOSAIC</div>
-            <div className="label-cap" style={{ color: "#999", marginBottom: 20 }}>Community Hub</div>
+            <div className="label-cap" style={{ color: "#999", marginBottom: 16 }}>Community Hub</div>
+            <h1 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 4px" }}>Hey there! 👋</h1>
+            <p style={{ fontSize: 14, color: "#777", marginBottom: 20 }}>Pop in your code to get started.</p>
 
             <input value={code} onChange={e => setCode(e.target.value)} placeholder="Your code" autoCapitalize="none" autoCorrect="off" style={field} />
             <input value={pin} onChange={e => setPin(e.target.value)} placeholder="PIN" type="password" inputMode="numeric" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
@@ -1597,6 +1599,7 @@
       const save = () => {
         const prof = { ...loadProfile(), name: name.trim() };
         if (DB && DB.pushProfile) DB.pushProfile(prof); else saveProfile(prof);
+        if (DB) DB.flags.giveConsent(); // consent recorded via "Let's go" + the note below
         onFinish && onFinish();
       };
       return (
@@ -1608,7 +1611,8 @@
             <p style={{ fontSize: 16, opacity: 0.92, marginBottom: 24 }}>What should we call you?</p>
             <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" onKeyDown={e => { if (e.key === "Enter" && name.trim()) save(); }} style={{ width: "100%", padding: 16, borderRadius: 14, border: "none", fontSize: 16, fontFamily: "inherit", textAlign: "center", marginBottom: 16, boxSizing: "border-box" }} />
             <button onClick={save} disabled={!name.trim()} style={{ width: "100%", background: "#fff", color: "var(--deep-red)", border: "none", borderRadius: 999, padding: "16px 24px", fontSize: 20, fontFamily: "'Lilita One', system-ui, sans-serif", cursor: name.trim() ? "pointer" : "default", opacity: name.trim() ? 1 : 0.6, boxShadow: "0 12px 32px rgba(0,0,0,0.25)", minHeight: 56 }}>Let's go 🙌</button>
-            <p style={{ fontSize: 13, opacity: 0.8, marginTop: 20 }}>You can tell us more about yourself anytime in the Me tab.</p>
+            <p style={{ fontSize: 13, opacity: 0.85, marginTop: 18, lineHeight: 1.5 }}>You can tell us more about yourself anytime in the Me tab.</p>
+            <p style={{ fontSize: 12, opacity: 0.75, marginTop: 10, lineHeight: 1.5 }}>🔒 We keep your info private. Only your Mosaic team can see it. By tapping Let's go you're okay with us storing it to support you.</p>
           </div>
         </div>
       );
@@ -1624,7 +1628,6 @@
 
     function App() {
       const [boot, setBoot] = useState("loading"); // loading | ready
-      const [consent, setConsent] = useState(() => DB && DB.flags.consentGiven());
       const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
       const [onboarded, setOnboarded] = useState(() => DB && DB.flags.onboarded());
       const [started, setStarted] = useState(() => !!localStorage.getItem(STORAGE_STARTED));
@@ -1662,7 +1665,6 @@
       const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setOnboarded(false); setStarted(false); };
 
       if (boot === "loading") return <LoadingScreen />;
-      if (!consent) return <ConsentGate onAgree={() => { DB && DB.flags.giveConsent(); setConsent(true); }} />;
       if (!session) return <Login onLoggedIn={onLoggedIn} />;
       // First open → short welcome (name only). Full profile lives in the Me tab.
       if (!onboarded) return <Onboarding onFinish={finishOnboarding} />;
