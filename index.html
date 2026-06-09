@@ -1002,7 +1002,8 @@
       const dayIso = (dayIdx) => isoKey(weekDates[dayIdx - 1]);
       const dayBookings = (dayIdx) => bookings[dayIso(dayIdx)] || [];
 
-      const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(null), 3200); };
+      // Toast supports an optional inline action (e.g. Undo). Longer dwell when actionable.
+      const showToast = (msg, action) => { setToast({ msg, action }); setTimeout(() => setToast(null), action ? 5500 : 3200); };
 
       const showStar = (anchor) => {
         if (!anchor) return;
@@ -1046,6 +1047,8 @@
         }));
         showStar(anchor);
         setConfirm(null);
+        // Instant undo for accidental adds — removes the just-added booking, no charge.
+        showToast(`Added ${activity.name} ✓`, { label: "Undo", fn: () => doRemove(activity.id, dateIso, false) });
       };
 
       // Tap × on a booked card → maybe late-cancel modal
@@ -1110,8 +1113,16 @@
           )}
 
           {toast && (
-            <div style={{ position: "fixed", bottom: 28, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", borderRadius: 18, padding: "14px 28px", zIndex: 100, boxShadow: "0 4px 24px rgba(0,0,0,0.25)", fontSize: 15, fontWeight: 700, whiteSpace: "nowrap" }}>
-              {toast}
+            <div style={{ position: "fixed", bottom: 96, left: "50%", transform: "translateX(-50%)", background: "#1a1a1a", color: "#fff", borderRadius: 18, padding: "12px 16px 12px 22px", zIndex: 100, boxShadow: "0 4px 24px rgba(0,0,0,0.25)", fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 14, maxWidth: "calc(100vw - 32px)" }}>
+              <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{toast.msg}</span>
+              {toast.action && (
+                <button
+                  onClick={() => { toast.action.fn(); setToast(null); }}
+                  style={{ background: "var(--amber)", color: "var(--dark)", border: "none", borderRadius: 12, padding: "8px 16px", fontSize: 14, fontWeight: 800, cursor: "pointer", flexShrink: 0, minHeight: 40 }}
+                >
+                  {toast.action.label}
+                </button>
+              )}
             </div>
           )}
 
@@ -1182,7 +1193,7 @@
                         return (
                           <div key={bk.activityId} style={{ background: act.color + "22", border: `1px solid ${act.color}66`, borderRadius: 8, padding: "4px 5px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                             <span style={{ fontSize: 14 }}>{act.emoji}</span>
-                            <button onClick={e => { e.stopPropagation(); requestRemove(bk.activityId, d); }} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 11, color: "#bbb", padding: 0 }}>✕</button>
+                            <button aria-label="Remove" onClick={e => { e.stopPropagation(); requestRemove(bk.activityId, d); }} style={{ background: "rgba(232,48,0,0.1)", border: "none", cursor: "pointer", fontSize: 13, lineHeight: 1, color: "var(--deep-red)", fontWeight: 800, width: 22, height: 22, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
                           </div>
                         );
                       })}
@@ -1211,7 +1222,6 @@
                     {availableForDay.map(act => {
                       const alreadyBooked = dayBookings(selectedDay).some(b => b.activityId === act.id && (b.status === "pending" || b.status === "confirmed"));
                       const blockLabel = blockRangeLabel(act);
-                      const disabled = alreadyBooked || weekLocked;
                       return (
                         <div key={act.id} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", border: alreadyBooked ? `2.5px solid ${act.color}` : "2.5px solid transparent", display: "flex", alignItems: "center", gap: 14, transition: "all 0.2s" }}>
                           <div style={{ width: 56, height: 56, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>{act.emoji}</div>
@@ -1223,13 +1233,25 @@
                             </div>
                             <span style={{ background: act.color + "20", color: act.color, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, marginTop: 5, display: "inline-block" }}>{act.category}</span>
                           </div>
-                          <button
-                            onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)}
-                            disabled={disabled}
-                            style={{ background: alreadyBooked ? "#f5f5f5" : (weekLocked ? "#ddd" : "var(--deep-red)"), color: alreadyBooked ? "#888" : (weekLocked ? "#999" : "#fff"), border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 700, fontSize: 14, cursor: disabled ? "default" : "pointer", flexShrink: 0, minWidth: 80, minHeight: 56 }}
-                          >
-                            {alreadyBooked ? "✓ Added" : (weekLocked ? "🔒" : "+ Add")}
-                          </button>
+                          {alreadyBooked ? (
+                            // Added → one clear tap to remove (no hunting for a tiny ✕).
+                            <button
+                              onClick={() => requestRemove(act.id, selectedDay)}
+                              disabled={weekLocked}
+                              style={{ background: weekLocked ? "#f0f0f0" : "#FFEBEE", color: weekLocked ? "#999" : "var(--deep-red)", border: weekLocked ? "none" : "2px solid #FFCDD2", borderRadius: 14, padding: "12px 14px", fontWeight: 800, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.2 }}
+                            >
+                              <span style={{ fontSize: 12, color: weekLocked ? "#999" : "#27AE60", fontWeight: 700 }}>✓ Added</span>
+                              <span>{weekLocked ? "🔒" : "Remove ✕"}</span>
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)}
+                              disabled={weekLocked}
+                              style={{ background: weekLocked ? "#ddd" : "var(--deep-red)", color: weekLocked ? "#999" : "#fff", border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 700, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56 }}
+                            >
+                              {weekLocked ? "🔒" : "+ Add"}
+                            </button>
+                          )}
                         </div>
                       );
                     })}
