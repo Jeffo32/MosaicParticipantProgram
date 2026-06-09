@@ -182,12 +182,14 @@ create or replace function is_admin() returns boolean language sql stable securi
   select exists (select 1 from profiles where id = auth.uid() and role in ('admin','manager'));
 $$;
 
+-- Date comparisons use Melbourne local date (the org's timezone), not UTC —
+-- otherwise assignments created in the AEST morning "start tomorrow".
 create or replace function worker_assigned_to(p_id uuid) returns boolean language sql stable security definer set search_path = public as $$
   select exists (
     select 1 from assignments
     where worker_id = auth.uid() and participant_id = p_id
-      and active_from <= current_date
-      and (active_to is null or active_to >= current_date)
+      and active_from <= (now() at time zone 'Australia/Melbourne')::date
+      and (active_to is null or active_to >= (now() at time zone 'Australia/Melbourne')::date)
   );
 $$;
 

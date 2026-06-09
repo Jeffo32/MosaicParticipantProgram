@@ -6,6 +6,17 @@
 -- (These changes are also baked into schema.sql.)
 -- ============================================================
 
+-- Assignment date checks use Melbourne local date, not UTC (fixes assignments
+-- created in the AEST morning being invisible until UTC catches up).
+create or replace function worker_assigned_to(p_id uuid) returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from assignments
+    where worker_id = auth.uid() and participant_id = p_id
+      and active_from <= (now() at time zone 'Australia/Melbourne')::date
+      and (active_to is null or active_to >= (now() at time zone 'Australia/Melbourne')::date)
+  );
+$$;
+
 create or replace function staff_can(p_id uuid) returns boolean language sql stable security definer set search_path = public as $$
   select is_admin() or worker_assigned_to(p_id);
 $$;
