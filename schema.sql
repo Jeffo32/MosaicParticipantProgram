@@ -194,7 +194,7 @@ $$;
 -- Verify a participant PIN (used by the serverless login function via service role).
 -- Returns the participant uuid on success, null otherwise.
 create or replace function verify_participant_pin(p_code text, p_pin text)
-returns uuid language sql stable security definer set search_path = public as $$
+returns uuid language sql stable security definer set search_path = public, extensions as $$
   select id from participants
   where access_code = p_code and pin_hash is not null and pin_hash = crypt(p_pin, pin_hash)
   limit 1;
@@ -202,7 +202,7 @@ $$;
 
 -- Set/replace a participant PIN (service role only in practice).
 create or replace function set_participant_pin(p_id uuid, p_pin text)
-returns void language sql security definer set search_path = public as $$
+returns void language sql security definer set search_path = public, extensions as $$
   update participants set pin_hash = crypt(p_pin, gen_salt('bf')) where id = p_id;
 $$;
 
