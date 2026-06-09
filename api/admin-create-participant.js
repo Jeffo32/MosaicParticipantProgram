@@ -21,14 +21,15 @@ export default async function handler(req, res) {
     }
 
     // ---- validate payload ----
-    const { name, phone, accessCode, pin, mode } = await readJson(req);
-    if (!name || !accessCode || !pin) return res.status(400).json({ error: "name, accessCode and pin are required." });
+    const { name, phone, pin, mode } = await readJson(req);
+    if (!name || !pin) return res.status(400).json({ error: "Name and PIN are required." });
     if (String(pin).length < 4) return res.status(400).json({ error: "PIN must be at least 4 digits." });
-    const cleanCode = String(accessCode).trim();
+    // Participants log in by NAME, so access_code = lower-cased display name.
+    const cleanCode = String(name).trim().toLowerCase();
 
-    // ---- uniqueness check on access_code ----
+    // ---- uniqueness check (no two participants with the same name) ----
     const dupe = await sb.from("participants").select("id").eq("access_code", cleanCode).maybeSingle();
-    if (dupe.data) return res.status(409).json({ error: "That access code is already in use." });
+    if (dupe.data) return res.status(409).json({ error: "A participant with that name already exists." });
 
     // ---- create auth user ----
     const email = participantEmail(cleanCode);

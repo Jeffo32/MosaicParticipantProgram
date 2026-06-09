@@ -96,18 +96,18 @@
     // Participant: access code + PIN.
     //  • Supabase mode → /api/participant-login mints an OTP we verify.
     //  • Demo mode     → any non-empty code logs into the local participant.
-    participantLogin: async function (accessCode, pin) {
-      accessCode = (accessCode || "").trim();
+    participantLogin: async function (name, pin) {
+      name = (name || "").trim();
       if (!ENABLED) {
-        if (!accessCode) throw new Error("Enter your code.");
+        if (!name) throw new Error("Enter your name.");
         var prof = data._localProfile();
-        setSession({ role: "participant", id: "demo-participant", name: prof.name || "", mode: "both" });
+        setSession({ role: "participant", id: "demo-participant", name: name || prof.name || "", mode: "both" });
         return session;
       }
       var resp = await fetch("/api/participant-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessCode: accessCode, pin: pin }),
+        body: JSON.stringify({ name: name, pin: pin }),
       });
       var body = await resp.json().catch(function () { return {}; });
       if (!resp.ok) throw new Error(body.error || "Login failed. Check your code and PIN.");

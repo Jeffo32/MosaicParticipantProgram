@@ -66,6 +66,30 @@
       to   { transform: translateY(0); }
     }
 
+    /* ── Lava lamp background (animated gradient + drifting blurred blobs) ── */
+    @keyframes lavaGrad { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+    @keyframes lavaA {
+      0%   { transform: translate(0,0) scale(1);      border-radius: 50% 50% 50% 50%; }
+      50%  { transform: translate(42px,32px) scale(1.4); border-radius: 60% 40% 55% 45%; }
+      100% { transform: translate(-18px,12px) scale(1.1); border-radius: 45% 55% 50% 50%; }
+    }
+    @keyframes lavaB {
+      0%   { transform: translate(0,0) scale(1);       border-radius: 50%; }
+      50%  { transform: translate(-46px,-26px) scale(1.32); border-radius: 55% 45% 60% 40%; }
+      100% { transform: translate(16px,-10px) scale(1.06); border-radius: 50%; }
+    }
+    .lava {
+      position: relative; overflow: hidden;
+      background: linear-gradient(135deg, #FF8A00 0%, #FF6B00 28%, #E83000 64%, #C41010 100%);
+      background-size: 220% 220%;
+      animation: lavaGrad 16s ease-in-out infinite;
+    }
+    .lava::before, .lava::after { content: ""; position: absolute; pointer-events: none; filter: blur(34px); opacity: 0.55; z-index: 0; }
+    .lava::before { width: 260px; height: 260px; top: -90px; left: -60px; background: radial-gradient(circle at 30% 30%, #FFC061, rgba(255,150,40,0)); animation: lavaA 19s ease-in-out infinite alternate; }
+    .lava::after  { width: 240px; height: 240px; bottom: -100px; right: -50px; background: radial-gradient(circle at 50% 50%, #FF3D00, rgba(196,16,16,0)); animation: lavaB 23s ease-in-out infinite alternate; }
+    .lava > * { position: relative; z-index: 1; }
+    @media (prefers-reduced-motion: reduce) { .lava, .lava::before, .lava::after { animation: none; } }
+
     /* Page transitions */
     .route-enter { animation: fadeUp 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
 
@@ -285,16 +309,12 @@
     function Splash({ onStart, name }) {
       const first = (name || "").trim().split(" ")[0];
       return (
-        <div className="route-enter" style={{
-          minHeight: "100vh", background: "var(--gradient)", position: "relative", overflow: "hidden",
+        <div className="route-enter lava" style={{
+          minHeight: "100vh",
           display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
           padding: "32px 28px", textAlign: "center", color: "#fff"
         }}>
-          {/* Decorative blobs */}
-          <div style={{ position: "absolute", top: -160, right: -160, width: 420, height: 420, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
-          <div style={{ position: "absolute", bottom: -120, left: -120, width: 320, height: 320, borderRadius: "50%", background: "rgba(255,255,255,0.05)" }} />
-
-          <div style={{ position: "relative", zIndex: 1, animation: "pop 0.6s cubic-bezier(0.22,1,0.36,1) both" }}>
+          <div style={{ animation: "pop 0.6s cubic-bezier(0.22,1,0.36,1) both" }}>
             <img src="Public/mosaic-icon.png" alt="Mosaic icon" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 140, height: 140, marginBottom: 16, objectFit: "contain" }} />
             <div className="bebas" style={{ fontSize: 56, lineHeight: 0.9, color: "#fff", marginBottom: 4 }}>MOSAIC</div>
             <div className="label-cap" style={{ color: "rgba(255,255,255,0.85)", marginBottom: 32 }}>Elite Health Community Hub</div>
@@ -825,14 +845,8 @@
 
       return (
         <div className="route-enter" style={{ background: "var(--off-white)", minHeight: "100vh", color: "var(--dark)" }}>
-          <div style={{ background: "var(--gradient)", padding: "20px 20px 18px", color: "#fff", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: -80, right: -80, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", marginBottom: 14, position: "relative", gap: 2 }}>
-              <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 4 }} />
-              <div className="bebas" style={{ fontSize: 26, color: "#fff", lineHeight: 0.9 }}>MOSAIC</div>
-              <div className="label-cap" style={{ fontSize: 9, color: "rgba(255,255,255,0.85)" }}>Elite Health Community Hub</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.15)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "10px 16px", position: "relative" }}>
+          <div className="lava" style={{ padding: "16px 20px", color: "#fff" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.15)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "10px 16px" }}>
               <button onClick={() => setWeekOffset(w => w - 1)} style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", width: 36, height: 36, borderRadius: 12 }}>‹</button>
               <div style={{ textAlign: "center" }}>
                 <div className="label-cap" style={{ opacity: 0.75, marginBottom: 2 }}>Week of</div>
@@ -853,14 +867,6 @@
                 <span style={{ fontSize: 18 }}>✈️</span>
                 You're marked away on {awayThisWeek.map(d => fmt(d)).join(", ")}.
               </div>
-            )}
-
-            {onAway && (
-              <button onClick={onAway} style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, background: "#fff", border: "2px solid var(--peach)", borderRadius: 14, padding: "12px 14px", cursor: "pointer", textAlign: "left", marginBottom: 20, boxShadow: "var(--shadow-card)" }}>
-                <span style={{ fontSize: 20 }}>✈️</span>
-                <span style={{ flex: 1, fontWeight: 700, fontSize: 15 }}>Going to be away?</span>
-                <span style={{ color: "var(--deep-red)", fontWeight: 800, fontSize: 13 }}>Let us know ›</span>
-              </button>
             )}
 
             {weekDates.map((date, i) => {
@@ -1113,9 +1119,9 @@
 
     function BottomNav({ active, go }) {
       return (
-        <nav style={{
+        <nav className="lava" style={{
           position: "fixed", bottom: 0, left: 0, right: 0,
-          background: "var(--gradient)", borderTop: "none",
+          borderTop: "none",
           display: "flex", justifyContent: "space-around",
           padding: "6px 4px calc(6px + env(safe-area-inset-bottom))",
           zIndex: 90, boxShadow: "0 -6px 24px rgba(26,10,0,0.18)"
@@ -1146,7 +1152,7 @@
     // ============================================================
     function Scheduler({ onSaved }) {
       const [weekOffset, setWeekOffset] = useState(0);
-      const [selectedDay, setSelectedDay] = useState(null);
+      const [selectedDay, setSelectedDay] = useState(1); // one day in view at a time (1=Mon … 5=Fri)
       const [bookings, setBookings] = useState(loadBookings); // { isoDate: [{activityId, status, addedAt, ...}] }
       const [toast, setToast] = useState(null);
       const [star, setStar] = useState(null);
@@ -1223,6 +1229,11 @@
         setConfirm(null);
         // Instant undo for accidental adds — removes the just-added booking, no charge.
         showToast(`Added ${activity.name} ✓`, { label: "Undo", fn: () => doRemove(activity.id, dateIso, false) });
+        // Auto-advance to the next day once this day is full (the daily cap).
+        const filled = (bookings[dateIso] || []).filter(b => b.status === "pending" || b.status === "confirmed").length + 1;
+        if (filled >= MAX_SESSIONS_PER_DAY && selectedDay < 5) {
+          setTimeout(() => setSelectedDay(d => Math.min(5, d + 1)), 850);
+        }
       };
 
       // Tap × on a booked card → maybe late-cancel modal
@@ -1300,35 +1311,29 @@
             </div>
           )}
 
-          {/* Header — brand gradient */}
-          <div style={{ background: "var(--gradient)", padding: "20px 20px 18px", color: "#fff", position: "relative", overflow: "hidden" }}>
-            <div style={{ position: "absolute", top: -80, right: -80, width: 200, height: 200, borderRadius: "50%", background: "rgba(255,255,255,0.06)" }} />
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", marginBottom: 14, position: "relative", gap: 2 }}>
-              <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 56, height: 56, objectFit: "contain", marginBottom: 4 }} />
-              <div className="bebas" style={{ fontSize: 26, color: "#fff", lineHeight: 0.9 }}>MOSAIC</div>
-              <div className="label-cap" style={{ fontSize: 9, color: "rgba(255,255,255,0.85)" }}>Elite Health Community Hub</div>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.15)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "10px 16px", position: "relative" }}>
-              <button onClick={() => { setWeekOffset(w => w - 1); setSelectedDay(null); }} className="btn" style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", width: 36, height: 36, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
+          {/* Header — animated lava bar + week nav */}
+          <div className="lava" style={{ padding: "16px 20px", color: "#fff" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "rgba(255,255,255,0.15)", backdropFilter: "blur(8px)", borderRadius: 16, padding: "10px 16px" }}>
+              <button onClick={() => { setWeekOffset(w => w - 1); setSelectedDay(1); }} className="btn" style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", width: 36, height: 36, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>‹</button>
               <div style={{ textAlign: "center" }}>
                 <div className="label-cap" style={{ opacity: 0.75, marginBottom: 2 }}>Week of</div>
                 <div className="bebas" style={{ fontSize: 20 }}>{weekLabel}</div>
               </div>
-              <button onClick={() => { setWeekOffset(w => w + 1); setSelectedDay(null); }} className="btn" style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", width: 36, height: 36, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
+              <button onClick={() => { setWeekOffset(w => w + 1); setSelectedDay(1); }} className="btn" style={{ background: "rgba(255,255,255,0.2)", border: "none", color: "#fff", fontSize: 20, cursor: "pointer", width: 36, height: 36, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>›</button>
             </div>
           </div>
 
-          <div style={{ padding: "16px 14px", maxWidth: 500, margin: "0 auto" }}>
+          <div style={{ padding: "18px 16px 40px", maxWidth: 520, margin: "0 auto" }}>
             {weekLocked && (
-              <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 14, fontSize: 14, color: "var(--dark)", fontWeight: 600 }}>
-                🔒 This week is locked. Tap a session to ask about a change.
+              <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 14, color: "var(--dark)", fontWeight: 600 }}>
+                🔒 This week is locked. Tap Chat to ask about a change.
               </div>
             )}
 
             {showModeTabs && (
-              <div style={{ display: "flex", background: "#fff", borderRadius: 14, padding: 4, marginBottom: 14, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+              <div style={{ display: "flex", background: "#fff", borderRadius: 14, padding: 4, marginBottom: 16, boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
                 {[{ id: "program", label: "Programs", emoji: "👥" }, { id: "one_on_one", label: "1:1 Support", emoji: "🤝" }].map(t => (
-                  <button key={t.id} onClick={() => { setModeTab(t.id); setSelectedDay(null); }} style={{
+                  <button key={t.id} onClick={() => { setModeTab(t.id); setSelectedDay(1); }} style={{
                     flex: 1, background: modeTab === t.id ? "var(--deep-red)" : "transparent",
                     color: modeTab === t.id ? "#fff" : "#666",
                     border: "none", borderRadius: 11, padding: "12px 8px",
@@ -1341,110 +1346,78 @@
               </div>
             )}
 
-            {!selectedDay && !weekLocked && (
-              <div style={{ textAlign: "center", padding: "14px 10px 10px", color: "#555", fontSize: 15, fontWeight: 600 }}>
-                👇 <span style={{ color: "var(--deep-red)" }}>Tap</span> a day to see what's on
-              </div>
-            )}
-
-            {/* Calendar Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8, marginBottom: 20 }}>
-              {[1, 2, 3, 4, 5].map(d => {
-                const date = weekDates[d - 1];
-                const bks = dayBookings(d).filter(b => b.status === "pending" || b.status === "confirmed");
-                const isSelected = selectedDay === d;
-                const slots = Math.max(0, 2 - bks.length);
-                const away = awaySet.has(isoKey(date));
-                return (
-                  <div key={d} onClick={() => setSelectedDay(isSelected ? null : d)} style={{ background: away ? "var(--peach)" : "#fff", border: isSelected ? "2.5px solid var(--deep-red)" : (away ? "2px solid var(--amber)" : "2px solid #eee"), borderRadius: 16, padding: "10px 6px", cursor: "pointer", boxShadow: isSelected ? "0 4px 16px rgba(232,48,0,0.22)" : "0 2px 8px rgba(0,0,0,0.06)", transition: "all 0.2s", minHeight: 110 }}>
-                    <div style={{ textAlign: "center", marginBottom: 8 }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, color: isSelected ? "var(--deep-red)" : "#aaa", textTransform: "uppercase" }}>{DAY_NAMES[d - 1]}</div>
-                      <div style={{ fontSize: 16, fontWeight: 800, color: "#1a1a1a" }}>{date.getDate()}</div>
-                      {away && <div title="You're away" style={{ fontSize: 11, marginTop: 1 }}>✈️</div>}
+            {/* Day stepper — one day at a time */}
+            {(() => {
+              const dayAway = awaySet.has(isoKey(weekDates[selectedDay - 1]));
+              const stepBtn = (on) => ({ background: "#fff", border: "1px solid #eee", color: "var(--deep-red)", fontSize: 24, width: 48, height: 48, borderRadius: 14, cursor: on ? "pointer" : "default", flexShrink: 0, boxShadow: "var(--shadow-card)" });
+              return (
+                <>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <button onClick={() => setSelectedDay(d => Math.max(1, d - 1))} disabled={selectedDay <= 1} style={{ ...stepBtn(selectedDay > 1), opacity: selectedDay <= 1 ? 0.35 : 1 }}>‹</button>
+                    <div style={{ textAlign: "center", flex: 1 }}>
+                      <div className="lilita" style={{ fontSize: 30, color: "var(--dark)", lineHeight: 1 }}>{DAY_FULL[selectedDay - 1]}</div>
+                      <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>{fmt(weekDates[selectedDay - 1])}{dayAway ? "  ·  ✈️ away" : ""}</div>
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                      {bks.map(bk => {
-                        const act = ACTIVITIES.find(a => a.id === bk.activityId);
-                        if (!act) return null;
-                        return (
-                          <div key={bk.activityId} style={{ background: act.color + "22", border: `1px solid ${act.color}66`, borderRadius: 8, padding: "4px 5px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                            <span style={{ fontSize: 14 }}>{act.emoji}</span>
-                            <button aria-label="Remove" onClick={e => { e.stopPropagation(); requestRemove(bk.activityId, d); }} style={{ background: "rgba(232,48,0,0.1)", border: "none", cursor: "pointer", fontSize: 13, lineHeight: 1, color: "var(--deep-red)", fontWeight: 800, width: 22, height: 22, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>✕</button>
-                          </div>
-                        );
-                      })}
-                      {[...Array(slots)].map((_, i) => (
-                        <div key={i} style={{ border: "1.5px dashed #ddd", borderRadius: 8, height: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                          <span style={{ fontSize: 10, color: "#ccc" }}>+</span>
-                        </div>
-                      ))}
-                    </div>
+                    <button onClick={() => setSelectedDay(d => Math.min(5, d + 1))} disabled={selectedDay >= 5} style={{ ...stepBtn(selectedDay < 5), opacity: selectedDay >= 5 ? 0.35 : 1 }}>›</button>
                   </div>
-                );
-              })}
-            </div>
-
-            {/* Activity Drawer */}
-            {selectedDay && (
-              <div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <h2 style={{ margin: 0, fontSize: 17, fontWeight: 800 }}>{DAY_FULL[selectedDay - 1]}</h2>
-                  <button onClick={() => setSelectedDay(null)} style={{ background: "#f0f0f0", border: "none", fontSize: 12, color: "#666", cursor: "pointer", fontWeight: 700, borderRadius: 10, padding: "6px 12px" }}>Close ✕</button>
-                </div>
-                {availableForDay.length === 0 ? (
-                  <div style={{ textAlign: "center", padding: "32px 20px", color: "#aaa", fontSize: 15 }}>😴 Nothing on this day</div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 24 }}>
-                    {availableForDay.map(act => {
-                      const alreadyBooked = dayBookings(selectedDay).some(b => b.activityId === act.id && (b.status === "pending" || b.status === "confirmed"));
-                      const blockLabel = blockRangeLabel(act);
-                      return (
-                        <div key={act.id} style={{ background: "#fff", borderRadius: 18, padding: "14px 16px", boxShadow: "0 2px 10px rgba(0,0,0,0.07)", border: alreadyBooked ? `2.5px solid ${act.color}` : "2.5px solid transparent", display: "flex", alignItems: "center", gap: 14, transition: "all 0.2s" }}>
-                          <div style={{ width: 56, height: 56, borderRadius: 16, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, flexShrink: 0 }}>{act.emoji}</div>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, fontSize: 15 }}>{act.name}</div>
-                            <div style={{ fontSize: 12, color: "#999", marginTop: 2 }}>
-                              {blockLabel}
-                              {act.location && <span style={{ marginLeft: 8, background: "#f0f0f0", color: "#555", borderRadius: 8, padding: "1px 8px", fontSize: 11, fontWeight: 600 }}>{act.location}</span>}
-                            </div>
-                            <span style={{ background: act.color + "20", color: act.color, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, marginTop: 5, display: "inline-block" }}>{act.category}</span>
-                          </div>
-                          {alreadyBooked ? (
-                            // Added → one clear tap to remove (no hunting for a tiny ✕).
-                            <button
-                              onClick={() => requestRemove(act.id, selectedDay)}
-                              disabled={weekLocked}
-                              style={{ background: weekLocked ? "#f0f0f0" : "#FFEBEE", color: weekLocked ? "#999" : "var(--deep-red)", border: weekLocked ? "none" : "2px solid #FFCDD2", borderRadius: 14, padding: "12px 14px", fontWeight: 800, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.2 }}
-                            >
-                              <span style={{ fontSize: 12, color: weekLocked ? "#999" : "#27AE60", fontWeight: 700 }}>✓ Added</span>
-                              <span>{weekLocked ? "🔒" : "Undo ↩"}</span>
-                            </button>
-                          ) : (
-                            <button
-                              onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)}
-                              disabled={weekLocked}
-                              style={{ background: weekLocked ? "#ddd" : "var(--deep-red)", color: weekLocked ? "#999" : "#fff", border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 700, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 88, minHeight: 56 }}
-                            >
-                              {weekLocked ? "🔒" : "+ Add"}
-                            </button>
-                          )}
-                        </div>
-                      );
+                  <div style={{ display: "flex", justifyContent: "center", gap: 8, marginBottom: 18 }}>
+                    {[1, 2, 3, 4, 5].map(d => {
+                      const has = dayBookings(d).filter(b => b.status === "pending" || b.status === "confirmed").length > 0;
+                      const cur = d === selectedDay;
+                      return <button key={d} onClick={() => setSelectedDay(d)} aria-label={DAY_FULL[d - 1]} style={{ width: cur ? 28 : 12, height: 12, borderRadius: 7, border: "none", cursor: "pointer", padding: 0, background: cur ? "var(--deep-red)" : (has ? "var(--amber)" : "#e7ded2"), transition: "all .25s" }} />;
                     })}
                   </div>
-                )}
+                </>
+              );
+            })()}
+
+            {/* The day's activities — one big focused card list */}
+            {availableForDay.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "48px 20px", color: "#aaa", fontSize: 16 }}>😴 Nothing on {DAY_FULL[selectedDay - 1]}.</div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 22 }}>
+                {availableForDay.map(act => {
+                  const alreadyBooked = dayBookings(selectedDay).some(b => b.activityId === act.id && (b.status === "pending" || b.status === "confirmed"));
+                  const blockLabel = blockRangeLabel(act);
+                  return (
+                    <div key={act.id} style={{ background: "#fff", borderRadius: 20, padding: "16px 18px", boxShadow: alreadyBooked ? "0 6px 20px rgba(232,48,0,0.14)" : "var(--shadow-card)", border: alreadyBooked ? `2.5px solid ${act.color}` : "1px solid #eee", display: "flex", alignItems: "center", gap: 14, transition: "all 0.2s" }}>
+                      <div style={{ width: 60, height: 60, borderRadius: 18, background: act.color + "18", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, flexShrink: 0 }}>{act.emoji}</div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, fontSize: 17 }}>{act.name}</div>
+                        <div style={{ fontSize: 13, color: "#999", marginTop: 3 }}>
+                          {blockLabel}
+                          {act.location && <span style={{ marginLeft: 8, background: "#f0f0f0", color: "#555", borderRadius: 8, padding: "1px 8px", fontSize: 11, fontWeight: 600 }}>{act.location}</span>}
+                        </div>
+                        <span style={{ background: act.color + "20", color: act.color, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700, marginTop: 6, display: "inline-block" }}>{act.category}</span>
+                      </div>
+                      {alreadyBooked ? (
+                        <button onClick={() => requestRemove(act.id, selectedDay)} disabled={weekLocked} style={{ background: weekLocked ? "#f0f0f0" : "#FFEBEE", color: weekLocked ? "#999" : "var(--deep-red)", border: weekLocked ? "none" : "2px solid #FFCDD2", borderRadius: 14, padding: "12px 14px", fontWeight: 800, fontSize: 14, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 92, minHeight: 60, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", lineHeight: 1.2 }}>
+                          <span style={{ fontSize: 12, color: weekLocked ? "#999" : "#27AE60", fontWeight: 700 }}>✓ Added</span>
+                          <span>{weekLocked ? "🔒" : "Undo ↩"}</span>
+                        </button>
+                      ) : (
+                        <button onClick={(e) => requestAdd(act, selectedDay, e.currentTarget)} disabled={weekLocked} style={{ background: weekLocked ? "#ddd" : "var(--deep-red)", color: weekLocked ? "#999" : "#fff", border: "none", borderRadius: 14, padding: "14px 16px", fontWeight: 800, fontSize: 15, cursor: weekLocked ? "default" : "pointer", flexShrink: 0, minWidth: 92, minHeight: 60 }}>
+                          {weekLocked ? "🔒" : "+ Add"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
-            {/* Save CTA */}
-            {!selectedDay && (
-              <button
-                onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); if (DB && DB.pushBookings) DB.pushBookings(); setTimeout(() => onSaved && onSaved(), 700); } }}
-                style={{ width: "100%", background: totalSessions > 0 ? "var(--gradient)" : "#ebebeb", color: totalSessions > 0 ? "#fff" : "#aaa", border: "none", borderRadius: 18, padding: "18px", fontSize: 19, cursor: totalSessions > 0 ? "pointer" : "not-allowed", marginTop: 4, marginBottom: 32, boxShadow: totalSessions > 0 ? "var(--shadow-warm)" : "none", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em" }}
-              >
-                {totalSessions > 0 ? `Save My Week ✨  (${totalSessions} session${totalSessions !== 1 ? "s" : ""})` : "What do you want to do this week?"}
+            {/* Next day / Save */}
+            {selectedDay < 5 ? (
+              <button onClick={() => setSelectedDay(d => Math.min(5, d + 1))} style={{ width: "100%", background: "#fff", color: "var(--deep-red)", border: "2px solid var(--peach)", borderRadius: 16, padding: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", minHeight: 56, marginBottom: 12 }}>
+                Next day · {DAY_FULL[selectedDay]} ›
               </button>
-            )}
+            ) : null}
+            <button
+              onClick={() => { if (totalSessions > 0) { showToast("Your program has been saved! 🎉"); if (DB && DB.pushBookings) DB.pushBookings(); setTimeout(() => onSaved && onSaved(), 700); } }}
+              style={{ width: "100%", background: totalSessions > 0 ? "var(--gradient)" : "#ebebeb", color: totalSessions > 0 ? "#fff" : "#aaa", border: "none", borderRadius: 18, padding: "18px", fontSize: 19, cursor: totalSessions > 0 ? "pointer" : "not-allowed", boxShadow: totalSessions > 0 ? "var(--shadow-warm)" : "none", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", letterSpacing: "0.02em" }}
+            >
+              {totalSessions > 0 ? `Save My Week ✨  (${totalSessions} session${totalSessions !== 1 ? "s" : ""})` : "Pick some activities ✨"}
+            </button>
           </div>
 
           {/* CONFIRM MODAL (feature 01) */}
@@ -1503,7 +1476,7 @@
     // ============================================================
     function FullCenter({ children }) {
       return (
-        <div style={{ minHeight: "100vh", background: "var(--gradient)", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div className="lava" style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
           {children}
         </div>
       );
@@ -1543,7 +1516,7 @@
 
     function Login({ onLoggedIn }) {
       const live = DB && DB.ENABLED;
-      const [code, setCode] = useState("");
+      const [name, setName] = useState("");
       const [pin, setPin] = useState("");
       const [busy, setBusy] = useState(false);
       const [err, setErr] = useState("");
@@ -1551,7 +1524,7 @@
       const submit = async () => {
         setErr(""); setBusy(true);
         try {
-          await DB.auth.participantLogin(code, pin);
+          await DB.auth.participantLogin(name, pin);
           onLoggedIn();
         } catch (e) {
           setErr(e.message || "Could not log in.");
@@ -1567,20 +1540,20 @@
             <div className="bebas" style={{ fontSize: 34, color: "var(--deep-red)", lineHeight: 0.9 }}>MOSAIC</div>
             <div className="label-cap" style={{ color: "#999", marginBottom: 16 }}>Community Hub</div>
             <h1 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 4px" }}>Hey there! 👋</h1>
-            <p style={{ fontSize: 14, color: "#777", marginBottom: 20 }}>Pop in your code to get started.</p>
+            <p style={{ fontSize: 14, color: "#777", marginBottom: 20 }}>Type your name and PIN to get started.</p>
 
-            <input value={code} onChange={e => setCode(e.target.value)} placeholder="Your code" autoCapitalize="none" autoCorrect="off" style={field} />
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoCapitalize="words" autoCorrect="off" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
             <input value={pin} onChange={e => setPin(e.target.value)} placeholder="PIN" type="password" inputMode="numeric" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
 
             {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
 
-            <button onClick={submit} disabled={busy || !code} style={{ width: "100%", background: busy || !code ? "#ebebeb" : "var(--gradient)", color: busy || !code ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: busy || !code ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: busy || !code ? "none" : "var(--shadow-warm)" }}>
+            <button onClick={submit} disabled={busy || !name.trim()} style={{ width: "100%", background: busy || !name.trim() ? "#ebebeb" : "var(--gradient)", color: busy || !name.trim() ? "#aaa" : "#fff", border: "none", borderRadius: 16, padding: 16, fontSize: 18, cursor: busy || !name.trim() ? "default" : "pointer", minHeight: 56, fontFamily: "'Lilita One', system-ui, sans-serif", boxShadow: busy || !name.trim() ? "none" : "var(--shadow-warm)" }}>
               {busy ? "Logging in…" : "Log in"}
             </button>
 
             {!live && (
               <div style={{ marginTop: 14, fontSize: 13, color: "#888", lineHeight: 1.5 }}>
-                Demo mode — enter any code and PIN to explore.
+                Demo mode — enter any name and PIN to explore.
               </div>
             )}
 
@@ -1603,7 +1576,7 @@
         onFinish && onFinish();
       };
       return (
-        <div className="route-enter" style={{ minHeight: "100vh", background: "var(--gradient)", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", textAlign: "center", color: "#fff" }}>
+        <div className="route-enter lava" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", textAlign: "center", color: "#fff" }}>
           <div style={{ width: "100%", maxWidth: 360 }}>
             <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 110, height: 110, objectFit: "contain", marginBottom: 8 }} />
             <div className="bebas" style={{ fontSize: 46, lineHeight: 0.9 }}>MOSAIC</div>

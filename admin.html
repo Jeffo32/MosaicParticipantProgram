@@ -320,22 +320,21 @@
     // PEOPLE TAB
     // ============================================================
     function NewParticipant({ onDone, onCancel }) {
-      const rnd = () => String(Math.floor(1000 + Math.abs((Date.now()%9000))));
-      const [f,setF]=useState({ name:"", phone:"", accessCode:rnd(), pin:"", mode:"both" });
+      const [f,setF]=useState({ name:"", phone:"", pin:"", mode:"both" });
       const [busy,setBusy]=useState(false); const [err,setErr]=useState(""); const [done,setDone]=useState(null);
       const up = (k,v)=> setF(s=>({ ...s, [k]:v }));
       const submit = async ()=>{
         setErr(""); setBusy(true);
-        try { const r = await A.createParticipant(f); setDone({ code:f.accessCode, pin:f.pin, name:f.name }); }
+        try { await A.createParticipant(f); setDone({ name:f.name, pin:f.pin }); }
         catch(e){ setErr(e.message); } finally { setBusy(false); }
       };
       if (done) return (
         <div className="card" style={{ padding:20 }}>
           <div style={{ fontSize:40, marginBottom:8 }}>✅</div>
           <h3 className="lilita" style={{ fontSize:22, marginBottom:8 }}>{done.name} is ready</h3>
-          <p style={{ fontSize:15, color:"#444", marginBottom:12 }}>Give them these to log in (write them down now):</p>
+          <p style={{ fontSize:15, color:"#444", marginBottom:12 }}>They log in with their name and this PIN (write it down now):</p>
           <div style={{ background:"#FAF6F0", borderRadius:12, padding:14, fontSize:18, fontWeight:800, letterSpacing:".05em" }}>
-            Code: {done.code}<br/>PIN: {done.pin}
+            Name: {done.name}<br/>PIN: {done.pin}
           </div>
           <button className="btnP" style={{ width:"100%", marginTop:16 }} onClick={onDone}>Done</button>
         </div>
@@ -343,9 +342,8 @@
       return (
         <div className="card" style={{ padding:20 }}>
           <h3 className="lilita" style={{ fontSize:22, marginBottom:14 }}>New participant</h3>
-          <input className="field" placeholder="Full name" value={f.name} onChange={e=>up("name",e.target.value)} />
+          <input className="field" placeholder="Full name (what they'll log in with)" value={f.name} onChange={e=>up("name",e.target.value)} />
           <input className="field" placeholder="Phone (for SMS reminders)" value={f.phone} onChange={e=>up("phone",e.target.value)} />
-          <input className="field" placeholder="Access code" value={f.accessCode} onChange={e=>up("accessCode",e.target.value)} autoCapitalize="none" />
           <input className="field" placeholder="PIN (4+ digits)" value={f.pin} onChange={e=>up("pin",e.target.value)} inputMode="numeric" />
           <select className="field" value={f.mode} onChange={e=>up("mode",e.target.value)}>
             <option value="both">Programs + 1:1</option>
@@ -355,7 +353,7 @@
           {err && <div style={{ color:"var(--deep-red)", fontSize:14, marginBottom:10 }}>{err}</div>}
           <div style={{ display:"flex", gap:8 }}>
             <button className="btnS" style={{ flex:1 }} onClick={onCancel}>Cancel</button>
-            <button className="btnP" style={{ flex:2 }} disabled={busy || !f.name || !f.accessCode || !f.pin} onClick={submit}>{busy?"Creating…":"Create participant"}</button>
+            <button className="btnP" style={{ flex:2 }} disabled={busy || !f.name || !f.pin} onClick={submit}>{busy?"Creating…":"Create participant"}</button>
           </div>
         </div>
       );
