@@ -172,6 +172,13 @@
     // ============================================================
     // SHARED bits
     // ============================================================
+    // Responsive: laptops/desktops (>=960px) get the wide top-nav layout.
+    function useIsDesktop(bp) {
+      bp = bp || 960;
+      const [d,setD]=useState(()=> (typeof window!=="undefined" && window.innerWidth>=bp));
+      useEffect(()=>{ const on=()=>setD(window.innerWidth>=bp); window.addEventListener("resize",on); return ()=>window.removeEventListener("resize",on); },[bp]);
+      return d;
+    }
     function StatusChip({ value }) {
       const c = STATUS_COLOR[value] || "#999";
       return <span className="chip" style={{ background:c+"1A", color:c }}>{(value||"").replace("_"," ")}</span>;
@@ -184,11 +191,12 @@
     // ============================================================
     // REQUESTS TAB
     // ============================================================
-    function RequestsTab() {
+    function RequestsTab({ wide }) {
       const [rows,setRows]=useState(null); const [filter,setFilter]=useState("open"); const [err,setErr]=useState("");
       const load = useCallback(async ()=>{ try{ setRows(await A.listServiceRequests(filter==="all"?null:filter)); }catch(e){ setErr(e.message);} },[filter]);
       useEffect(()=>{ load(); const t=setInterval(load, 8000); return ()=>clearInterval(t); },[load]);
       const setStatus = async (id,status)=>{ await A.setServiceRequestStatus(id,status); load(); };
+      const listStyle = wide ? { display:"grid", gridTemplateColumns:"repeat(2, minmax(0,1fr))", gap:12, alignItems:"start" } : { display:"flex", flexDirection:"column", gap:10 };
 
       return (
         <div>
@@ -199,7 +207,7 @@
           </div>
           {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
           {rows===null ? <Loading/> : rows.length===0 ? <Empty>No {filter==="all"?"":filter} requests 🎉</Empty> : (
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+            <div style={listStyle}>
               {rows.map(r=>{
                 const meta = SERVICE_META[r.type] || SERVICE_META.other;
                 return (
@@ -230,7 +238,7 @@
     // ============================================================
     // WEEK TAB (bookings)
     // ============================================================
-    function WeekTab() {
+    function WeekTab({ wide }) {
       const [offset,setOffset]=useState(0); const [rows,setRows]=useState(null); const [err,setErr]=useState("");
       const [workers,setWorkers]=useState([]);
       const mon = useMemo(()=>mondayOf(offset),[offset]);
@@ -267,8 +275,10 @@
               ))}
             </div>
           )}
-          {rows===null ? <Loading/> : dates.length===0 ? <Empty>No bookings this week.</Empty> : dates.map(date=>(
-            <div key={date} style={{ marginBottom:18 }}>
+          {rows===null ? <Loading/> : dates.length===0 ? <Empty>No bookings this week.</Empty> : (
+            <div style={wide ? { display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(330px, 1fr))", gap:18, alignItems:"start" } : undefined }>
+            {dates.map(date=>(
+            <div key={date} style={{ marginBottom: wide?0:18 }}>
               <div className="cap" style={{ color:"var(--flame)", marginBottom:8 }}>{fmtDate(date)}</div>
               <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
                 {byDate[date].map(b=>{
@@ -299,6 +309,8 @@
               </div>
             </div>
           ))}
+            </div>
+          )}
         </div>
       );
     }
@@ -402,31 +414,52 @@
       </div>
     ); }
 
-    function PeopleTab() {
+    function PeopleTab({ wide }) {
       const [rows,setRows]=useState(null); const [err,setErr]=useState("");
       const [view,setView]=useState("list"); // list | new | <id>
       const load = useCallback(async ()=>{ try{ setRows(await A.listParticipants()); }catch(e){ setErr(e.message);} },[]);
       useEffect(()=>{ load(); },[load]);
-      if (view==="new") return <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />;
-      if (view!=="list") return <ProfileView id={view} onBack={()=>setView("list")} />;
-      return (
+
+      const listEl = (
         <div>
-          <button className="btnP" style={{ marginBottom:14 }} onClick={()=>setView("new")}>+ New participant</button>
+          <button className="btnP" style={{ marginBottom:14, width: wide?"100%":undefined }} onClick={()=>setView("new")}>+ New participant</button>
           {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
           {rows===null ? <Loading/> : rows.length===0 ? <Empty>No participants yet.</Empty> : (
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-              {rows.map(p=>(
-                <button key={p.id} className="card" style={{ padding:16, textAlign:"left", display:"flex", alignItems:"center", gap:12 }} onClick={()=>setView(p.id)}>
-                  <div style={{ width:42, height:42, borderRadius:"50%", background:"var(--gradient)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontFamily:"'Lilita One'" }}>{(p.display_name||"?")[0]}</div>
-                  <div style={{ flex:1 }}>
-                    <div style={{ fontWeight:800, fontSize:16 }}>{p.display_name}</div>
-                    <div style={{ fontSize:13, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
-                  </div>
-                  <span style={{ color:"#ccc", fontSize:20 }}>›</span>
-                </button>
-              ))}
+              {rows.map(p=>{
+                const sel = wide && view===p.id;
+                return (
+                  <button key={p.id} className="card" style={{ padding:16, textAlign:"left", display:"flex", alignItems:"center", gap:12, border: sel?"2px solid var(--deep-red)":"1px solid var(--line)", background: sel?"#FFF3E8":"#fff" }} onClick={()=>setView(p.id)}>
+                    <div style={{ width:42, height:42, borderRadius:"50%", background:"var(--gradient)", color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontFamily:"'Lilita One'" }}>{(p.display_name||"?")[0]}</div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:800, fontSize:16 }}>{p.display_name}</div>
+                      <div style={{ fontSize:13, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
+                    </div>
+                    {!wide && <span style={{ color:"#ccc", fontSize:20 }}>›</span>}
+                  </button>
+                );
+              })}
             </div>
           )}
+        </div>
+      );
+
+      // Mobile: navigate to a full-screen form/profile.
+      if (!wide) {
+        if (view==="new") return <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />;
+        if (view!=="list") return <ProfileView id={view} onBack={()=>setView("list")} />;
+        return listEl;
+      }
+
+      // Desktop: master-detail.
+      const detail = view==="new"
+        ? <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />
+        : (view!=="list" ? <ProfileView id={view} onBack={()=>setView("list")} />
+          : <div className="card" style={{ padding:48, textAlign:"center", color:"#aaa", fontSize:15 }}>Select a participant to see their profile, care notes and away days.</div>);
+      return (
+        <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:24, alignItems:"start" }}>
+          {listEl}
+          <div>{detail}</div>
         </div>
       );
     }
@@ -434,7 +467,7 @@
     // ============================================================
     // ACTIVITIES TAB
     // ============================================================
-    function ActivitiesTab() {
+    function ActivitiesTab({ wide }) {
       const [rows,setRows]=useState(null); const [err,setErr]=useState(""); const [edit,setEdit]=useState(null);
       const load = useCallback(async ()=>{ try{ setRows(await A.listActivities()); }catch(e){ setErr(e.message);} },[]);
       useEffect(()=>{ load(); },[load]);
@@ -446,7 +479,7 @@
       if (edit) {
         const up=(k,v)=>setEdit(s=>({ ...s, [k]:v }));
         return (
-          <div className="card" style={{ padding:20 }}>
+          <div className="card" style={{ padding:20, maxWidth: wide?560:undefined }}>
             <h3 className="lilita" style={{ fontSize:22, marginBottom:14 }}>{edit.id?"Edit":"New"} activity</h3>
             <input className="field" placeholder="Name" value={edit.name} onChange={e=>up("name",e.target.value)} />
             <div style={{ display:"flex", gap:8 }}>
@@ -478,7 +511,7 @@
           {LIVE && <button className="btnP" style={{ marginBottom:14 }} onClick={()=>setEdit(blank)}>+ New activity</button>}
           {err && <div style={{ color:"var(--deep-red)", marginBottom:10 }}>{err}</div>}
           {rows===null ? <Loading/> : (
-            <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            <div style={ wide ? { display:"grid", gridTemplateColumns:"repeat(2, minmax(0,1fr))", gap:10, alignItems:"start" } : { display:"flex", flexDirection:"column", gap:8 } }>
               {rows.map(a=>(
                 <div key={a.id} className="card" style={{ padding:14, display:"flex", alignItems:"center", gap:12, borderLeft:`5px solid ${a.color||"#ccc"}` }}>
                   <div style={{ fontSize:22 }}>{a.emoji}</div>
@@ -499,7 +532,7 @@
     // ============================================================
     // CHAT TAB
     // ============================================================
-    function ChatTab() {
+    function ChatTab({ wide }) {
       const [people,setPeople]=useState(null); const [pid,setPid]=useState(null);
       const [msgs,setMsgs]=useState(null); const [draft,setDraft]=useState("");
       useEffect(()=>{ A.listParticipants().then(ps=>{ setPeople(ps); if(ps.length===1) setPid(ps[0].id); }).catch(()=>{}); },[]);
@@ -508,33 +541,64 @@
       const send = async ()=>{ const t=draft.trim(); if(!t||!pid) return; setDraft(""); await A.replyMessage(pid,t); load(); };
 
       if (people===null) return <Loading/>;
-      if (!pid) return (
+      const person = people.find(p=>p.id===pid);
+
+      const threadList = (
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-          {people.length===0 ? <Empty>No participants to message yet.</Empty> : people.map(p=>(
-            <button key={p.id} className="card" style={{ padding:16, textAlign:"left", fontWeight:800 }} onClick={()=>setPid(p.id)}>{p.display_name}</button>
-          ))}
+          {people.length===0 ? <Empty>No participants to message yet.</Empty> : people.map(p=>{
+            const sel = wide && pid===p.id;
+            return <button key={p.id} className="card" style={{ padding:16, textAlign:"left", fontWeight:800, border: sel?"2px solid var(--deep-red)":"1px solid var(--line)", background: sel?"#FFF3E8":"#fff" }} onClick={()=>{ setPid(p.id); setMsgs(null); }}>{p.display_name}</button>;
+          })}
         </div>
       );
-      const person = people.find(p=>p.id===pid);
+
+      const messagesEl = (
+        <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14, maxHeight: wide?"62vh":"50vh", overflowY:"auto" }}>
+          {msgs===null ? <Loading/> : msgs.length===0 ? <Empty>No messages yet.</Empty> : msgs.map(m=>{
+            const staff = m.sender==="staff";
+            return (
+              <div key={m.id} style={{ alignSelf: staff?"flex-end":"flex-start", maxWidth:"80%" }}>
+                <div style={{ background: staff?"var(--deep-red)":"#fff", color: staff?"#fff":"#222", border: staff?"none":"1px solid var(--line)", borderRadius:14, padding:"10px 14px", fontSize:15 }}>{m.body}</div>
+                <div style={{ fontSize:10, color:"#aaa", margin:"2px 6px", textAlign: staff?"right":"left" }}>{fmtDT(m.created_at)}</div>
+              </div>
+            );
+          })}
+        </div>
+      );
+
+      const composer = (
+        <div style={{ display:"flex", gap:8 }}>
+          <input className="field" style={{ marginBottom:0, flex:1 }} placeholder="Reply…" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") send(); }} />
+          <button className="btnP" onClick={send} disabled={!draft.trim()}>Send</button>
+        </div>
+      );
+
+      // Desktop: list + conversation side by side.
+      if (wide) {
+        return (
+          <div style={{ display:"grid", gridTemplateColumns:"300px 1fr", gap:24, alignItems:"start" }}>
+            {threadList}
+            <div>
+              {!pid ? <div className="card" style={{ padding:48, textAlign:"center", color:"#aaa", fontSize:15 }}>Pick someone on the left to message.</div> : (
+                <div>
+                  <div style={{ fontWeight:800, fontSize:18, marginBottom:12 }}>{person?.display_name}</div>
+                  {messagesEl}
+                  {composer}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      }
+
+      // Mobile: list, then conversation with a back button.
+      if (!pid) return threadList;
       return (
         <div>
           {people.length>1 && <button className="btnS" style={{ marginBottom:12 }} onClick={()=>{ setPid(null); setMsgs(null); }}>‹ All chats</button>}
           <div style={{ fontWeight:800, fontSize:18, marginBottom:12 }}>{person?.display_name}</div>
-          <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14, maxHeight:"50vh", overflowY:"auto" }}>
-            {msgs===null ? <Loading/> : msgs.length===0 ? <Empty>No messages yet.</Empty> : msgs.map(m=>{
-              const staff = m.sender==="staff";
-              return (
-                <div key={m.id} style={{ alignSelf: staff?"flex-end":"flex-start", maxWidth:"80%" }}>
-                  <div style={{ background: staff?"var(--deep-red)":"#fff", color: staff?"#fff":"#222", border: staff?"none":"1px solid var(--line)", borderRadius:14, padding:"10px 14px", fontSize:15 }}>{m.body}</div>
-                  <div style={{ fontSize:10, color:"#aaa", margin:"2px 6px", textAlign: staff?"right":"left" }}>{fmtDT(m.created_at)}</div>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ display:"flex", gap:8 }}>
-            <input className="field" style={{ marginBottom:0, flex:1 }} placeholder="Reply…" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter") send(); }} />
-            <button className="btnP" onClick={send} disabled={!draft.trim()}>Send</button>
-          </div>
+          {messagesEl}
+          {composer}
         </div>
       );
     }
@@ -552,7 +616,33 @@
 
     function Dashboard({ onLogout }) {
       const [tab,setTab]=useState("requests");
+      const wide = useIsDesktop();
       const Active = (TABS.find(t=>t.id===tab)||TABS[0]).C;
+
+      // DESKTOP / laptop — top nav bar, full-width content
+      if (wide) {
+        return (
+          <div style={{ minHeight:"100vh" }}>
+            <header style={{ position:"sticky", top:0, zIndex:50, background:"var(--gradient)", color:"#fff", display:"flex", alignItems:"center", gap:18, padding:"0 28px", height:62, boxShadow:"0 2px 14px rgba(26,10,0,.18)" }}>
+              <div style={{ lineHeight:1 }}>
+                <div className="bebas" style={{ fontSize:22 }}>MOSAIC STAFF</div>
+                <div className="cap" style={{ opacity:.85, fontSize:9 }}>{LIVE ? "Live" : "Demo mode"}</div>
+              </div>
+              <nav style={{ display:"flex", gap:4, flex:1, marginLeft:14 }}>
+                {TABS.map(t=>(
+                  <button key={t.id} onClick={()=>setTab(t.id)} style={{ background: tab===t.id?"rgba(255,255,255,.22)":"transparent", color:"#fff", border:"none", borderRadius:10, padding:"8px 16px", display:"flex", alignItems:"center", gap:8, fontWeight:800, fontSize:14, cursor:"pointer", opacity: tab===t.id?1:.85 }}>
+                    <span style={{ fontSize:18 }}>{t.emoji}</span> {t.label}
+                  </button>
+                ))}
+              </nav>
+              <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"9px 16px", fontWeight:700, fontSize:13, cursor:"pointer" }}>{LIVE?"Log out":"Exit"}</button>
+            </header>
+            <main style={{ maxWidth:1440, margin:"0 auto", padding:"26px 28px 60px" }}><Active wide={true}/></main>
+          </div>
+        );
+      }
+
+      // MOBILE — bottom nav
       return (
         <div style={{ maxWidth:680, margin:"0 auto", padding:"0 0 90px" }}>
           <div style={{ background:"var(--gradient)", color:"#fff", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -562,7 +652,7 @@
             </div>
             <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontWeight:700, fontSize:13 }}>{LIVE?"Log out":"Exit"}</button>
           </div>
-          <div style={{ padding:"18px 16px" }}><Active/></div>
+          <div style={{ padding:"18px 16px" }}><Active wide={false}/></div>
           <nav style={{ position:"fixed", bottom:0, left:0, right:0, background:"#fff", borderTop:"1px solid var(--line)", display:"flex", justifyContent:"space-around", padding:"6px 4px calc(6px + env(safe-area-inset-bottom))", zIndex:50 }}>
             {TABS.map(t=>(
               <button key={t.id} onClick={()=>setTab(t.id)} style={{ flex:1, border:"none", background:"none", display:"flex", flexDirection:"column", alignItems:"center", gap:2, padding:"8px 4px", color: tab===t.id?"var(--deep-red)":"#999", fontWeight:800 }}>
