@@ -239,7 +239,13 @@
       lset(K.PROFILE, profile);
       if (!ENABLED || !session || session.role !== "participant") return { ok: true, demo: true };
       try {
-        var u = await sb.from("participants").update({ about_me: profile }).eq("id", session.id);
+        // Preserve staff-set CRM data (about_me.intake: dob/contact/funding) so a
+        // participant editing their About Me never wipes it.
+        var keepIntake = null;
+        try { var cur = await sb.from("participants").select("about_me").eq("id", session.id).single(); if (cur.data && cur.data.about_me && cur.data.about_me.intake) keepIntake = cur.data.about_me.intake; } catch (e) {}
+        var merged = Object.assign({}, profile);
+        if (keepIntake) merged.intake = keepIntake;
+        var u = await sb.from("participants").update({ about_me: merged }).eq("id", session.id);
         if (u.error) throw u.error;
         if (profile.name && profile.name !== session.name) {
           await sb.from("profiles").update({ display_name: profile.name }).eq("id", session.id);
@@ -351,6 +357,18 @@
         var body = await resp.json().catch(function () { return {}; });
         if (!resp.ok) throw new Error(body.error || "Could not create participant.");
         return body;
+      },
+
+      deleteParticipant: async function (id) {
+        var token = (await sb.auth.getSession()).data.session.access_token;
+        var resp = await fetch("/api/admin-delete-participant", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+          body: JSON.stringify({ id: id }),
+        });
+        var body = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(body.error || "Could not delete participant.");
+        return true;
       },
 
       listServiceRequests: async function (status) {

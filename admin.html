@@ -96,6 +96,7 @@
       listParticipants: async () => [{ id:"demo", display_name:demoName(), phone:"", mode:"both", role:"participant" }],
       getParticipant: async () => ({ id:"demo", display_name:demoName(), phone:"", mode:"both", about_me: lsGet("mosaic_profile_v1",{}) }),
       createParticipant: async () => { throw new Error("Connect Supabase to add real participants."); },
+      deleteParticipant: async () => { throw new Error("Connect Supabase to delete participants."); },
       listServiceRequests: async (status) => {
         let all = lsGet("mosaic_service_requests_v1", []);
         if (status) all = all.filter(r => r.status === status);
@@ -360,12 +361,19 @@
       );
     }
 
-    function ProfileView({ id, onBack }) {
-      const [p,setP]=useState(null); const [err,setErr]=useState(""); const [away,setAway]=useState([]);
+    function ProfileView({ id, onBack, onDeleted }) {
+      const [p,setP]=useState(null); const [err,setErr]=useState(""); const [away,setAway]=useState([]); const [busy,setBusy]=useState(false);
       useEffect(()=>{ A.getParticipant(id).then(setP).catch(e=>setErr(e.message)); A.getAway(id).then(setAway).catch(()=>setAway([])); },[id]);
+      const del = async ()=>{
+        if (!confirm(`Delete ${p.display_name}? This removes their login, bookings, profile and messages permanently. This can't be undone.`)) return;
+        setBusy(true);
+        try { await A.deleteParticipant(id); (onDeleted||onBack)(); }
+        catch(e){ alert(e.message); setBusy(false); }
+      };
       if (err) return <div style={{ color:"var(--deep-red)" }}>{err}</div>;
       if (!p) return <Loading/>;
       const am = p.about_me || {};
+      const intake = am.intake || {};
       const favList = (arr)=> (arr&&arr.length)? arr.join(", ") : "—";
       const wellbeing = am.wellbeing || {};
       return (
@@ -375,6 +383,14 @@
             <h2 className="lilita" style={{ fontSize:26 }}>{p.display_name}</h2>
             <div style={{ fontSize:14, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
           </div>
+          {(intake.dob || intake.contact_name || intake.funding) && (
+            <div className="card" style={{ padding:20, marginBottom:14 }}>
+              <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>Mosaic records</div>
+              <Row k="Date of birth" v={intake.dob||"—"} />
+              <Row k="Primary contact" v={intake.contact_name ? `${intake.contact_name}${intake.contact_phone?` · ${intake.contact_phone}`:""}` : "—"} />
+              <Row k="Funding" v={intake.funding||"—"} />
+            </div>
+          )}
           {away.length>0 && (
             <div className="card" style={{ padding:16, marginBottom:14, borderLeft:"5px solid var(--amber)", background:"#FFF8EF" }}>
               <div className="cap" style={{ color:"#B26A00", marginBottom:8 }}>✈️ Away days</div>
@@ -404,6 +420,9 @@
               </>
             )}
           </div>
+          <button onClick={del} disabled={busy} style={{ width:"100%", marginTop:16, background:"#fff", color:"var(--deep-red)", border:"2px solid #FFCDD2", borderRadius:14, padding:14, fontSize:14, fontWeight:800, cursor: busy?"default":"pointer" }}>
+            {busy ? "Deleting…" : "Delete participant"}
+          </button>
         </div>
       );
     }
@@ -444,17 +463,19 @@
         </div>
       );
 
+      const onDeleted = ()=>{ setView("list"); load(); };
+
       // Mobile: navigate to a full-screen form/profile.
       if (!wide) {
         if (view==="new") return <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />;
-        if (view!=="list") return <ProfileView id={view} onBack={()=>setView("list")} />;
+        if (view!=="list") return <ProfileView id={view} onBack={()=>setView("list")} onDeleted={onDeleted} />;
         return listEl;
       }
 
       // Desktop: master-detail.
       const detail = view==="new"
         ? <NewParticipant onCancel={()=>setView("list")} onDone={()=>{ setView("list"); load(); }} />
-        : (view!=="list" ? <ProfileView id={view} onBack={()=>setView("list")} />
+        : (view!=="list" ? <ProfileView id={view} onBack={()=>setView("list")} onDeleted={onDeleted} />
           : <div className="card" style={{ padding:48, textAlign:"center", color:"#aaa", fontSize:15 }}>Select a participant to see their profile, care notes and away days.</div>);
       return (
         <div style={{ display:"grid", gridTemplateColumns:"340px 1fr", gap:24, alignItems:"start" }}>
