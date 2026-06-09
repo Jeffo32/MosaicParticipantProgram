@@ -16,23 +16,30 @@ For how it's built, see [README.md](README.md).
 | **Participant app** | https://mosaic-participant-program.vercel.app |
 | **Staff dashboard** | https://mosaic-participant-program.vercel.app/admin |
 
-- **Participants** log in with a **code + PIN** (issued from the dashboard).
-- **Staff** log in with **email + password**. Admin account: `jeffo.productions@gmail.com`
-  (change the password in Supabase → Authentication → Users).
+- **Participants** log in with their **name + PIN** (case-insensitive name; PIN issued from the dashboard).
+- **Staff** log in with **email + password**. Change your password via the **Password**
+  button in the dashboard top bar, or **Forgot password?** on the login screen (emails a reset link).
 
-Status: **LIVE** on Supabase (real multi-user). 40 program participants imported June 2026.
+Status: **LIVE** on Supabase (real multi-user). 40 program participants + 15 staff imported June 2026.
 
 ---
 
 ## Everyday tasks (staff dashboard → `/admin`)
 
-**Add a participant** — People → **+ New participant** → fill name, phone, a unique
-access code, a 4-digit PIN, and their mode (Programs / 1:1 / Both). Hand them the
-code + PIN. They log into the participant app with those.
+**Add a participant** *(admins only)* — People → **+ New participant** → name, phone,
+a 4-digit PIN, and their mode (Programs / 1:1 / Both). They log into the participant
+app with their **name + that PIN**.
 
-**Remove a participant** — People → tap the person → **Delete participant** (bottom of
-their profile). This permanently removes their login, bookings, messages, away days
-and profile. There's no undo.
+**Reset a participant's PIN** — People → tap the person → **Reset PIN**. Admins can
+reset anyone's; workers only their assigned participants.
+
+**Assign a support worker** *(admins only)* — People → tap the person → **Support team**
+card → pick a worker → Assign. Once per-worker scoping is active, workers only see the
+participants assigned to them here.
+
+**Remove a participant** *(admins only)* — People → tap the person → **Delete participant**
+(bottom of their profile). This permanently removes their login, bookings, messages,
+away days and profile. There's no undo.
 
 **See who's coming this week** — Week tab. Shows each booking per day; **Confirm** /
 **Cancel** a session, or **Assign worker**. An **"Away this week"** banner shows anyone
@@ -59,19 +66,27 @@ bottom-nav layout.
 ## Issuing logins to the imported 40
 
 The 40 program participants already have accounts (name, phone, DOB, primary contact,
-funding). Each has a **code + PIN** — hand them out from the credentials list. To reset
-someone's PIN, currently re-create them, or ask the dev to run `set_participant_pin`.
-(A staff "reset PIN" button is a known future add — see below.)
+funding). Each logs in with their **name + their PIN** from the credentials list.
+Forgot a PIN? Open their profile → **Reset PIN** and hand them the new one.
+
+## Staff roles & scoping
+
+- **Admins/managers** (full access): add/delete participants, assign workers, manage activities.
+- **Workers**: day-to-day view. Once `scope.sql` has been run in Supabase, workers only
+  see participants assigned to them (People → participant → **Support team**).
+- All staff can change their own password (top-bar **Password** button).
 
 ---
 
 ## Notifications
 
 - **Primary channel = the dashboard.** New requests/messages appear there live; no setup.
-- **SMS/email are optional** and currently **off**. To turn on:
-  - SMS (Twilio): set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`,
-    `STAFF_NOTIFY_PHONE` in Vercel env, then redeploy.
-  - Email (Resend): set `RESEND_API_KEY`, `STAFF_NOTIFY_EMAIL`.
+- **Email (Resend): wired and ON**, but in test mode until the `mosaicelitehealth.com`
+  domain is verified at resend.com/domains — until then alerts deliver only to the
+  Resend account owner's email. After verification, point `RESEND_FROM` and
+  `STAFF_NOTIFY_EMAIL` at the real addresses (Vercel env) and redeploy.
+- **SMS (Twilio): off.** To turn on: set `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`,
+  `TWILIO_FROM`, `STAFF_NOTIFY_PHONE` in Vercel env, then redeploy.
 - **Nightly reminder** cron (`/api/cron-reminders`) runs daily at **09:00 UTC (7pm AEST)**;
   it texts each participant tomorrow's sessions once Twilio is configured (logs a preview
   otherwise). Adjust the time in `vercel.json` for daylight saving.
@@ -101,15 +116,17 @@ vercel --prod --yes --scope deku-57bb7dd6
   `SUPABASE_ANON_KEY`, `CRON_SECRET` (+ optional Twilio/Resend above). The
   **service_role** key is admin-level — Vercel env only, never client-side.
 - **Serverless functions** (`/api`): `participant-login`, `admin-create-participant`,
-  `admin-delete-participant`, `notify`, `cron-reminders`.
-- **Auth model:** staff = Supabase email/password; participants = code + PIN verified
+  `admin-delete-participant`, `admin-set-pin`, `notify`, `cron-reminders`.
+- **Auth model:** staff = Supabase email/password; participants = name + PIN verified
   server-side and exchanged for an RLS-scoped session. RLS isolates each participant's data.
+- **Per-worker scoping:** [`scope.sql`](scope.sql) — run once in the SQL editor to limit
+  workers to their assigned participants (also baked into `schema.sql`).
 
 ---
 
 ## Security & privacy
 
-- Participant codes/PINs are sensitive — share each only with that participant/carer.
+- Participant PINs are sensitive — share each only with that participant/carer.
 - Change the admin password from the one set at launch.
 - Consent is captured on a participant's first run (the "Let's go" welcome).
 - Some imported phone numbers are a carer's/coordinator's, not the participant's —
@@ -119,8 +136,12 @@ vercel --prod --yes --scope deku-57bb7dd6
 
 ## Known gaps / next
 
-- **Staff "reset participant PIN"** button (currently dev-only via `set_participant_pin`).
-- **SMS/email** delivery is built but off until Twilio/Resend keys are added.
+- **Run `scope.sql`** in Supabase to activate per-worker scoping (until then, workers see everyone).
+- **Verify `mosaicelitehealth.com` in Resend** (needs DNS access) → unlocks real staff
+  emails + custom SMTP for password-reset emails (Supabase → Auth → SMTP: host
+  `smtp.resend.com`, port `465`, user `resend`, password = Resend API key).
+- **Assign workers** to each participant (only a demo assignment exists so far).
+- **SMS** is built but off until Twilio keys are added.
 - Activities seed is **Mon–Fri**; schema supports Sat/Sun if you add them.
 - Front-end runs React via CDN (zero build). A Vite port would speed first load; the
   data layer (`js/db.js`) is already isolated for that.
