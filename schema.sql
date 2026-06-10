@@ -219,6 +219,8 @@ $$;
 -- Otherwise the public anon key could brute-force or reset PINs directly.
 revoke execute on function verify_participant_pin(text, text) from anon, authenticated, public;
 revoke execute on function set_participant_pin(uuid, text)     from anon, authenticated, public;
+grant  execute on function verify_participant_pin(text, text) to service_role;
+grant  execute on function set_participant_pin(uuid, text)     to service_role;
 
 -- ============================================================
 -- ROW LEVEL SECURITY
