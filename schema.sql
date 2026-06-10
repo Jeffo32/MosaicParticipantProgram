@@ -214,6 +214,12 @@ returns void language sql security definer set search_path = public, extensions 
   update participants set pin_hash = crypt(p_pin, gen_salt('bf')) where id = p_id;
 $$;
 
+-- These SECURITY DEFINER functions must NOT be callable from the browser
+-- (anon/authenticated) — only the serverless API via the service_role key.
+-- Otherwise the public anon key could brute-force or reset PINs directly.
+revoke execute on function verify_participant_pin(text, text) from anon, authenticated, public;
+revoke execute on function set_participant_pin(uuid, text)     from anon, authenticated, public;
+
 -- ============================================================
 -- ROW LEVEL SECURITY
 -- ============================================================
