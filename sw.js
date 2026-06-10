@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v1";
+const CACHE = "mosaic-v2"; // bumped: Participant Partner art flow + chibi illustrations
 const SHELL = [
   "./",
   "./index.html",
@@ -12,6 +12,16 @@ const SHELL = [
   "./Public/mosaic-icon.png",
   "./icons/icon-192.png",
   "./icons/apple-touch-icon.png",
+  // Chibi character art (optimized .jpg) — precache for offline.
+  "./assets/characters/hero-welcome.jpg",
+  "./assets/characters/onboarding-hello.jpg",
+  "./assets/characters/q-likes.jpg",
+  "./assets/characters/q-strengths.jpg",
+  "./assets/characters/q-skills.jpg",
+  "./assets/characters/q-wellbeing.jpg",
+  "./assets/characters/plan-week.jpg",
+  "./assets/characters/week-done.jpg",
+  "./assets/characters/help-support.jpg",
 ];
 
 self.addEventListener("install", (e) => {
