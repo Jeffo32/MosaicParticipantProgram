@@ -9,3 +9,6 @@ node_modules/
 # Full-res character art originals (2048px). Optimized .jpg versions are committed;
 # these are kept locally for marketing / re-export. See assets/characters/PROMPTS.md.
 assets/characters/_originals/
+
+# Private credentials sheet — live PINs, NEVER commit (this is a public repo).
+LOGINS.local.md
