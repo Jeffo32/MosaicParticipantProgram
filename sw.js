@@ -1,10 +1,9 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v2"; // bumped: Participant Partner art flow + chibi illustrations
+const CACHE = "mosaic-v3"; // v3: clean URLs (cleanUrls 308-redirects .html → breaks addAll + nav)
 const SHELL = [
   "./",
-  "./index.html",
-  "./admin.html",
+  "./admin",
   "./config.js",
   "./js/db.js",
   "./manifest.webmanifest",
@@ -49,13 +48,15 @@ self.addEventListener("fetch", (e) => {
       if (hit) return hit;
       return fetch(req)
         .then((resp) => {
-          if (resp && resp.ok) {
+          // Don't cache redirected/opaque responses — cache.put() throws on them,
+          // and returning a redirected response to a navigation is a browser error.
+          if (resp && resp.ok && !resp.redirected) {
             const copy = resp.clone();
             caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
           }
           return resp;
         })
-        .catch(() => caches.match("./index.html"));
+        .catch(() => caches.match("./"));
     })
   );
 });
