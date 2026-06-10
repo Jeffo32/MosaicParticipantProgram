@@ -120,13 +120,13 @@
     // ============================================================
     const STORAGE_BOOKINGS = "mosaic_bookings_v2";
     const STORAGE_STARTED  = "mosaic_started_v1";
+    const STORAGE_INTRO    = "mosaic_intro_seen_v1";
     const STORAGE_PROFILE = "mosaic_profile_v1";
     const STORAGE_REQUESTS = "mosaic_service_requests_v1";
     const STORAGE_SMS = "mosaic_sms_queue_v1";
     const STORAGE_CHAT = "mosaic_chat_v1";
     const CFG = window.MOSAIC_CONFIG || {};
     const DB = window.MosaicDB;
-    const LATE_CANCEL_CUTOFF_DAYS = CFG.LATE_CANCEL_CUTOFF_DAYS || 4; // org_settings.late_cancel_cutoff_days
     const MAX_SESSIONS_PER_DAY = CFG.MAX_SESSIONS_PER_DAY || 2;
 
     // 3-hour blocks. Spec: 9-12, 12-3, 3-6, 6-9
@@ -140,7 +140,6 @@
     // Activities — keep emojis and colors per owner direction.
     // start_block/end_block => time-block model (feature 06)
     // mode: 'program' | 'one_on_one' | 'both' (feature 05)
-    // practitioner_led: skip late-cancel charge (feature 08)
     // bring_money: amount appended to night-before SMS (feature 10)
     // `let` (not const): replaced at runtime with staff-managed activities
     // from Supabase when the backend is configured (see initActivities()).
@@ -246,14 +245,6 @@
       return new Date() > getLockTime(monday);
     }
 
-    // Late cancel = within cutoff days of the booking date.
-    function isLateCancel(dateIso, cutoffDays = LATE_CANCEL_CUTOFF_DAYS) {
-      const target = new Date(dateIso + "T00:00:00");
-      const cutoff = new Date(target);
-      cutoff.setDate(cutoff.getDate() - cutoffDays);
-      return new Date() > cutoff;
-    }
-
     // Block overlap check: two activities collide if their [start..end] ranges overlap.
     function blocksOverlap(a, b) {
       return !(a.end_block < b.start_block || b.end_block < a.start_block);
@@ -304,6 +295,36 @@
     }
 
     // ============================================================
+    // ILLUSTRATION — warm chibi character art with a branded fallback.
+    // Drop a PNG at assets/characters/<slot>.png and it appears with
+    // zero code changes. Until then a soft gradient + emoji card shows,
+    // so every screen looks intentional before any art is generated.
+    // See assets/characters/PROMPTS.md for the image-gen prompt pack.
+    // ============================================================
+    function Illustration({ slot, emoji = "🧡", size = 160, round = 28, style }) {
+      const [failed, setFailed] = useState(false);
+      const dim = { width: size, height: size };
+      if (failed) {
+        return (
+          <div aria-hidden="true" style={{
+            ...dim, borderRadius: round, background: "var(--gradient-soft)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: Math.round(size * 0.42), lineHeight: 1, flexShrink: 0,
+            boxShadow: "inset 0 0 0 1.5px rgba(255,107,0,0.14)", ...style
+          }}>{emoji}</div>
+        );
+      }
+      return (
+        <img
+          src={"assets/characters/" + slot + ".jpg"}
+          alt="" aria-hidden="true"
+          onError={() => setFailed(true)}
+          style={{ ...dim, objectFit: "contain", borderRadius: round, flexShrink: 0, ...style }}
+        />
+      );
+    }
+
+    // ============================================================
     // SPLASH (unchanged design)
     // ============================================================
     function Splash({ onStart, name }) {
@@ -339,6 +360,44 @@
             <div style={{ marginTop: 56, fontSize: 13, color: "rgba(255,255,255,0.7)", fontStyle: "italic" }}>
               Every family. Every person. Every step.
             </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // INTRO SPLASH — the first thing a new user sees. Warm, animated,
+    // "buddy app" welcome carried by the diverse chibi cast (hero-welcome).
+    // Shown pre-login on first run; remembered via STORAGE_INTRO.
+    // ============================================================
+    function IntroSplash({ onContinue }) {
+      const stagger = (i) => ({ animation: `fadeUp 0.6s cubic-bezier(0.22,1,0.36,1) ${(0.1 * i).toFixed(2)}s both` });
+      return (
+        <div className="lava" style={{
+          minHeight: "100vh", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          padding: "40px 28px", textAlign: "center", color: "#fff"
+        }}>
+          <div style={{ animation: "pop 0.7s cubic-bezier(0.22,1,0.36,1) both" }}>
+            <Illustration slot="hero-welcome" emoji="👋" size={200} round={40} style={{ marginBottom: 24 }} />
+          </div>
+          <div className="label-cap" style={{ ...stagger(1), color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>Mosaic Elite Health</div>
+          <h1 className="lilita" style={{ ...stagger(2), fontSize: 46, lineHeight: 1.02, margin: "0 0 16px", color: "#fff" }}>
+            Participant<br />Partner
+          </h1>
+          <p style={{ ...stagger(3), fontSize: 17, color: "rgba(255,255,255,0.94)", fontWeight: 500, lineHeight: 1.5, margin: "0 0 40px", maxWidth: 320 }}>
+            Your friendly companion for planning the week, sharing what you love, and staying close to your team.
+          </p>
+          <button onClick={onContinue} className="btn" style={{
+            ...stagger(4), background: "#fff", color: "var(--deep-red)", border: "none",
+            borderRadius: 999, padding: "18px 52px", fontSize: 22, cursor: "pointer",
+            fontFamily: "'Lilita One', system-ui, sans-serif",
+            boxShadow: "0 12px 32px rgba(0,0,0,0.25)", minHeight: 56
+          }}>
+            Get started →
+          </button>
+          <div style={{ ...stagger(5), marginTop: 48, fontSize: 13, color: "rgba(255,255,255,0.7)", fontStyle: "italic" }}>
+            Every family. Every person. Every step.
           </div>
         </div>
       );
@@ -552,10 +611,15 @@
         );
       };
 
-      const sectionHeader = (num, title, hint) => (
+      const sectionHeader = (num, title, hint, slot, emoji) => (
         <div style={{ marginTop: 28, marginBottom: 14, paddingTop: 18, borderTop: "2px dashed #eee" }}>
-          <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 4 }}>Section {num} of 4</div>
-          <h2 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 6px", lineHeight: 1.2 }}>{title}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
+            {slot && <Illustration slot={slot} emoji={emoji} size={76} round={20} />}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 4 }}>Section {num} of 4</div>
+              <h2 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: 0, lineHeight: 1.15 }}>{title}</h2>
+            </div>
+          </div>
           <p style={{ fontSize: 14, color: "#666", lineHeight: 1.4, margin: 0 }}>{hint}</p>
         </div>
       );
@@ -610,7 +674,7 @@
           </div>
 
           {/* Section 1 — Likes & Dislikes */}
-          {sectionHeader(1, "Likes & Dislikes", "Tap each one — once for like ❤️, twice for dislike ✕. Star ⭐ your 3 favourite things.")}
+          {sectionHeader(1, "Likes & Dislikes", "Tap each one — once for like ❤️, twice for dislike ✕. Star ⭐ your 3 favourite things.", "q-likes", "🎨")}
           {LIKES_OPTIONS.map(item => <LikeRow key={item} item={item} />)}
           <div style={{ marginTop: 12 }}>
             <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other hobbies & interests</label>
@@ -618,7 +682,7 @@
           </div>
 
           {/* Section 2 — Personal Strengths */}
-          {sectionHeader(2, "About Me", "Tap each sentence that describes you. Star ⭐ the 3 that best describe you.")}
+          {sectionHeader(2, "About Me", "Tap each sentence that describes you. Star ⭐ the 3 that best describe you.", "q-strengths", "💪")}
           {STRENGTHS_OPTIONS.map(item => <CheckRow key={item} field="strengths" favField="favoriteStrengths" item={item} />)}
           <div style={{ marginTop: 12 }}>
             <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other strengths</label>
@@ -626,7 +690,7 @@
           </div>
 
           {/* Section 3 — I'm Good At */}
-          {sectionHeader(3, "I'm Good At", "Tap everything you're good at. Star ⭐ the 3 you do best.")}
+          {sectionHeader(3, "I'm Good At", "Tap everything you're good at. Star ⭐ the 3 you do best.", "q-skills", "🌱")}
           {SKILLS_OPTIONS.map(item => <CheckRow key={item} field="skills" favField="favoriteSkills" item={item} />)}
           <div style={{ marginTop: 12 }}>
             <label style={{ display: "block", fontWeight: 700, fontSize: 14, marginBottom: 6 }}>Other things I'm good at</label>
@@ -634,7 +698,7 @@
           </div>
 
           {/* Section 4 — Personal Wellbeing */}
-          {sectionHeader(4, "Personal Wellbeing", "Thinking about the past 2 weeks, tap how often each was true for you.")}
+          {sectionHeader(4, "Personal Wellbeing", "Thinking about the past 2 weeks, tap how often each was true for you.", "q-wellbeing", "🧡")}
           {WELLBEING_OPTIONS.map(item => {
             const cur = (profile.wellbeing || {})[item];
             return (
@@ -862,8 +926,14 @@
           <div style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
             <h1 className="lilita" style={{ fontSize: 34, margin: "0 0 4px", color: "var(--dark)", lineHeight: 1.1 }}>Your week 🗓️</h1>
             <p style={{ color: "#666", fontSize: 15, marginBottom: 16 }}>
-              {totalSessions === 0 ? "Nothing booked yet." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} planned.`}
+              {totalSessions === 0 ? "Nothing booked yet." : `${totalSessions} session${totalSessions !== 1 ? "s" : ""} planned. Nice one!`}
             </p>
+
+            {totalSessions > 0 && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}>
+                <Illustration slot="week-done" emoji="🎉" size={128} round={28} />
+              </div>
+            )}
 
             {awayThisWeek.length > 0 && (
               <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 14, color: "var(--dark)", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
@@ -1161,7 +1231,6 @@
       const [star, setStar] = useState(null);
       const [confirm, setConfirm] = useState(null);    // {activity, dateIso, anchor}
       const [conflict, setConflict] = useState(null);  // {existingActivity, candidateActivity}
-      const [cancelAsk, setCancelAsk] = useState(null); // {activity, dateIso, late}
       const [awaySet, setAwaySet] = useState(() => new Set());
       const myMode = sessionMode();
       const [modeTab, setModeTab] = useState(myMode === "one_on_one" ? "one_on_one" : "program");
@@ -1230,8 +1299,8 @@
         }));
         showStar(anchor);
         setConfirm(null);
-        // Instant undo for accidental adds — removes the just-added booking, no charge.
-        showToast(`Added ${activity.name} ✓`, { label: "Undo", fn: () => doRemove(activity.id, dateIso, false) });
+        // Instant undo for accidental adds — removes the just-added booking.
+        showToast(`Added ${activity.name} ✓`, { label: "Undo", fn: () => doRemove(activity.id, dateIso) });
         // Auto-advance to the next day once this day is full (the daily cap).
         const filled = (bookings[dateIso] || []).filter(b => b.status === "pending" || b.status === "confirmed").length + 1;
         if (filled >= MAX_SESSIONS_PER_DAY && selectedDay < 5) {
@@ -1239,34 +1308,20 @@
         }
       };
 
-      // Tap × on a booked card → maybe late-cancel modal
+      // Tap Undo on a booked card → remove it.
       const requestRemove = (activityId, dayIdx) => {
         const dateIso = dayIso(dayIdx);
         // A locked week is genuinely locked now — no silent removals.
         if (weekLocked) { showToast("This week is locked — tap Chat to ask us to change it."); return; }
-        const activity = ACTIVITIES.find(a => a.id === activityId);
-        if (isLateCancel(dateIso) && !activity?.practitioner_led) {
-          setCancelAsk({ activity, dateIso, late: true });
-        } else {
-          doRemove(activityId, dateIso, false);
-        }
+        doRemove(activityId, dateIso);
       };
 
-      const doRemove = (activityId, dateIso, late) => {
+      const doRemove = (activityId, dateIso) => {
         setBookings(prev => {
           const list = prev[dateIso] || [];
-          if (late) {
-            return {
-              ...prev,
-              [dateIso]: list.map(b => b.activityId === activityId
-                ? { ...b, status: "late_cancelled", cancel_charge: true, cancelled_at: new Date().toISOString() }
-                : b)
-            };
-          }
           return { ...prev, [dateIso]: list.filter(b => b.activityId !== activityId) };
         });
-        setCancelAsk(null);
-        // Sync cancellation/late-cancel to staff (after state commits to localStorage).
+        // Sync the cancellation to staff (after state commits to localStorage).
         if (DB && DB.pushBookings) setTimeout(() => DB.pushBookings(), 120);
       };
 
@@ -1327,6 +1382,15 @@
           </div>
 
           <div style={{ padding: "18px 16px 40px", maxWidth: 520, margin: "0 auto" }}>
+            {/* Warm guide — frames the week as a friendly journey, one day at a time. */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 18 }}>
+              <Illustration slot="plan-week" emoji="📅" size={66} round={18} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div className="lilita" style={{ fontSize: 22, color: "var(--dark)", lineHeight: 1.1 }}>Let's plan your week</div>
+                <div style={{ fontSize: 13, color: "#888", marginTop: 3 }}>Pick up to {MAX_SESSIONS_PER_DAY} things a day — one day at a time. ✨</div>
+              </div>
+            </div>
+
             {weekLocked && (
               <div style={{ background: "var(--peach)", border: "2px solid var(--amber)", borderRadius: 14, padding: "12px 14px", marginBottom: 16, fontSize: 14, color: "var(--dark)", fontWeight: 600 }}>
                 🔒 This week is locked. Tap Chat to ask about a change.
@@ -1454,22 +1518,6 @@
             </Modal>
           )}
 
-          {/* LATE CANCEL MODAL (feature 08) */}
-          {cancelAsk && (
-            <Modal onClose={() => setCancelAsk(null)}>
-              <div style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 56, marginBottom: 8 }}>⚠️</div>
-                <h2 style={{ fontSize: 22, fontWeight: 800, margin: "0 0 8px" }}>Late cancellation</h2>
-                <p style={{ color: "#444", fontSize: 16, margin: "0 0 22px", lineHeight: 1.4 }}>
-                  This is classified as a late cancellation. You will be charged for this session. Please proceed.
-                </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <button onClick={() => doRemove(cancelAsk.activity.id, cancelAsk.dateIso, true)} style={{ background: "var(--deep-red)", color: "#fff", border: "none", borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 800, cursor: "pointer", minHeight: 56 }}>Cancel anyway</button>
-                  <button onClick={() => setCancelAsk(null)} style={{ background: "#f0f0f0", color: "#1a1a1a", border: "none", borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: "pointer", minHeight: 56 }}>Keep booking</button>
-                </div>
-              </div>
-            </Modal>
-          )}
         </div>
       );
     }
@@ -1525,9 +1573,13 @@
       const [err, setErr] = useState("");
 
       const submit = async () => {
-        setErr(""); setBusy(true);
+        setErr("");
+        // Need a full name — gentle nudge if they only typed one word.
+        const full = name.trim().replace(/\s+/g, " ");
+        if (!full.includes(" ")) { setErr("Don't forget your last name 🙂"); return; }
+        setBusy(true);
         try {
-          await DB.auth.participantLogin(name, pin);
+          await DB.auth.participantLogin(full, pin);
           onLoggedIn();
         } catch (e) {
           setErr(e.message || "Could not log in.");
@@ -1543,9 +1595,9 @@
             <div className="bebas" style={{ fontSize: 34, color: "var(--deep-red)", lineHeight: 0.9 }}>MOSAIC</div>
             <div className="label-cap" style={{ color: "#999", marginBottom: 16 }}>Community Hub</div>
             <h1 className="lilita" style={{ fontSize: 24, color: "var(--dark)", margin: "0 0 4px" }}>Hey there! 👋</h1>
-            <p style={{ fontSize: 14, color: "#777", marginBottom: 20 }}>Type your name and PIN to get started.</p>
+            <p style={{ fontSize: 14, color: "#777", marginBottom: 20 }}>Type your first and last name and your PIN to get started.</p>
 
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" autoCapitalize="words" autoCorrect="off" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
+            <input value={name} onChange={e => { setName(e.target.value); if (err) setErr(""); }} placeholder="First and last name" autoCapitalize="words" autoCorrect="off" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
             <input value={pin} onChange={e => setPin(e.target.value)} placeholder="PIN" type="password" inputMode="numeric" onKeyDown={e => { if (e.key === "Enter") submit(); }} style={field} />
 
             {err && <div style={{ color: "var(--deep-red)", fontSize: 14, fontWeight: 600, marginBottom: 12 }}>{err}</div>}
@@ -1572,8 +1624,11 @@
     // ============================================================
     function Onboarding({ onFinish }) {
       const [name, setName] = useState(() => (loadProfile().name || sessionName() || ""));
+      const [err, setErr] = useState("");
       const save = () => {
-        const prof = { ...loadProfile(), name: name.trim() };
+        const full = name.trim().replace(/\s+/g, " ");
+        if (!full.includes(" ")) { setErr("Don't forget your last name 🙂"); return; }
+        const prof = { ...loadProfile(), name: full };
         if (DB && DB.pushProfile) DB.pushProfile(prof); else saveProfile(prof);
         if (DB) DB.flags.giveConsent(); // consent recorded via "Let's go" + the note below
         onFinish && onFinish();
@@ -1581,11 +1636,13 @@
       return (
         <div className="route-enter lava" style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "32px 28px", textAlign: "center", color: "#fff" }}>
           <div style={{ width: "100%", maxWidth: 360 }}>
-            <img src="Public/mosaic-icon.png" alt="Mosaic" onError={e => { e.currentTarget.style.display = 'none'; }} style={{ width: 110, height: 110, objectFit: "contain", marginBottom: 8 }} />
-            <div className="bebas" style={{ fontSize: 46, lineHeight: 0.9 }}>MOSAIC</div>
-            <h1 className="lilita" style={{ fontSize: 30, margin: "20px 0 8px" }}>Welcome! 👋</h1>
-            <p style={{ fontSize: 16, opacity: 0.92, marginBottom: 24 }}>What should we call you?</p>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="Your name" onKeyDown={e => { if (e.key === "Enter" && name.trim()) save(); }} style={{ width: "100%", padding: 16, borderRadius: 14, border: "none", fontSize: 16, fontFamily: "inherit", textAlign: "center", marginBottom: 16, boxSizing: "border-box" }} />
+            <div style={{ display: "flex", justifyContent: "center", animation: "pop 0.6s cubic-bezier(0.22,1,0.36,1) both" }}>
+              <Illustration slot="onboarding-hello" emoji="🙂" size={132} round={34} style={{ marginBottom: 14 }} />
+            </div>
+            <h1 className="lilita" style={{ fontSize: 30, margin: "8px 0 8px" }}>Welcome! 👋</h1>
+            <p style={{ fontSize: 16, opacity: 0.92, marginBottom: 20 }}>What's your full name? <span style={{ opacity: 0.8 }}>(first and last, please)</span></p>
+            <input value={name} onChange={e => { setName(e.target.value); if (err) setErr(""); }} placeholder="First and last name" autoCapitalize="words" onKeyDown={e => { if (e.key === "Enter") save(); }} style={{ width: "100%", padding: 16, borderRadius: 14, border: "none", fontSize: 16, fontFamily: "inherit", textAlign: "center", marginBottom: err ? 8 : 16, boxSizing: "border-box" }} />
+            {err && <p style={{ fontSize: 14, fontWeight: 700, color: "#fff", background: "rgba(0,0,0,0.18)", borderRadius: 12, padding: "8px 12px", marginBottom: 16 }}>{err}</p>}
             <button onClick={save} disabled={!name.trim()} style={{ width: "100%", background: "#fff", color: "var(--deep-red)", border: "none", borderRadius: 999, padding: "16px 24px", fontSize: 20, fontFamily: "'Lilita One', system-ui, sans-serif", cursor: name.trim() ? "pointer" : "default", opacity: name.trim() ? 1 : 0.6, boxShadow: "0 12px 32px rgba(0,0,0,0.25)", minHeight: 56 }}>Let's go 🙌</button>
             <p style={{ fontSize: 13, opacity: 0.85, marginTop: 18, lineHeight: 1.5 }}>You can tell us more about yourself anytime in the Me tab.</p>
             <p style={{ fontSize: 12, opacity: 0.75, marginTop: 10, lineHeight: 1.5 }}>🔒 We keep your info private. Only your Mosaic team can see it. By tapping Let's go you're okay with us storing it to support you.</p>
@@ -1605,6 +1662,7 @@
     function App() {
       const [boot, setBoot] = useState("loading"); // loading | ready
       const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
+      const [introSeen, setIntroSeen] = useState(() => !!localStorage.getItem(STORAGE_INTRO));
       const [onboarded, setOnboarded] = useState(() => DB && DB.flags.onboarded());
       const [started, setStarted] = useState(() => !!localStorage.getItem(STORAGE_STARTED));
       const [scale, setScale] = useState(() => (DB ? DB.flags.scale() : 1.1));
@@ -1635,14 +1693,17 @@
         return () => { alive = false; off && off(); };
       }, []);
 
+      const seeIntro = () => { try { localStorage.setItem(STORAGE_INTRO, "1"); } catch {} setIntroSeen(true); };
       const start = () => { try { localStorage.setItem(STORAGE_STARTED, "1"); } catch {} setStarted(true); };
       const onLoggedIn = () => { setSessionState(DB.auth.session); setOnboarded(DB.flags.onboarded()); setRoute(hasAnyBookings() ? "summary" : "scheduler"); };
       const finishOnboarding = () => { DB && DB.flags.markOnboarded(); DB && DB.flags.markStarted(); setOnboarded(true); setStarted(true); setRoute("scheduler"); };
       const logout = async () => { if (DB) await DB.auth.logout(); setSessionState(null); setOnboarded(false); setStarted(false); };
 
       if (boot === "loading") return <LoadingScreen />;
+      // Very first thing a new user sees: the animated Participant Partner intro.
+      if (!session && !introSeen) return <IntroSplash onContinue={seeIntro} />;
       if (!session) return <Login onLoggedIn={onLoggedIn} />;
-      // First open → short welcome (name only). Full profile lives in the Me tab.
+      // First open → short welcome (full name). Full profile lives in the Me tab.
       if (!onboarded) return <Onboarding onFinish={finishOnboarding} />;
       if (!started) return <Splash onStart={start} name={session.name} />;
 

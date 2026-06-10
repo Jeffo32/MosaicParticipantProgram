@@ -5,3 +5,7 @@ node_modules/
 .DS_Store
 *.log
 .vercel
+
+# Full-res character art originals (2048px). Optimized .jpg versions are committed;
+# these are kept locally for marketing / re-export. See assets/characters/PROMPTS.md.
+assets/characters/_originals/
