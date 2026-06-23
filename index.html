@@ -630,7 +630,7 @@
       const inputStyle = { width: "100%", padding: 14, borderRadius: 14, border: "2px solid #eee", fontSize: 16, fontFamily: "inherit", background: "#fff", boxSizing: "border-box" };
 
       return (
-        <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
+        <div className="route-enter" style={{ padding: "calc(20px + env(safe-area-inset-top)) 18px 80px", maxWidth: 500, margin: "0 auto" }}>
           {!onboarding && <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>}
           {onboarding && <div className="label-cap" style={{ color: "var(--flame)", marginBottom: 6 }}>Welcome to Mosaic 👋</div>}
           <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>{onboarding ? "Let's set up your profile" : "About Me"}</h1>
@@ -766,7 +766,7 @@
       const upcoming = (list || []).slice().sort((a, b) => (a.start || "").localeCompare(b.start || ""));
 
       return (
-        <div className="route-enter" style={{ padding: "20px 18px 100px", maxWidth: 500, margin: "0 auto" }}>
+        <div className="route-enter" style={{ padding: "calc(20px + env(safe-area-inset-top)) 18px 100px", maxWidth: 500, margin: "0 auto" }}>
           <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
           <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>I'll be away ✈️</h1>
           <p style={{ color: "#666", fontSize: 15, marginBottom: 20 }}>Let us know the days you won't be coming in — one day, or a range. Your team will see it.</p>
@@ -849,7 +849,7 @@
 
       if (picked) {
         return (
-          <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
+          <div className="route-enter" style={{ padding: "calc(20px + env(safe-area-inset-top)) 18px 80px", maxWidth: 500, margin: "0 auto" }}>
             <button onClick={() => setPicked(null)} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
             <div style={{ fontSize: 48, marginBottom: 12 }}>{picked.emoji}</div>
             <h1 style={{ fontSize: 24, fontWeight: 800, margin: "0 0 18px" }}>{picked.label}</h1>
@@ -869,7 +869,7 @@
       }
 
       return (
-        <div className="route-enter" style={{ padding: "20px 18px 80px", maxWidth: 500, margin: "0 auto" }}>
+        <div className="route-enter" style={{ padding: "calc(20px + env(safe-area-inset-top)) 18px 80px", maxWidth: 500, margin: "0 auto" }}>
           <button onClick={onBack} style={{ background: "none", border: "none", fontSize: 16, fontWeight: 700, color: "var(--deep-red)", cursor: "pointer", marginBottom: 12, padding: 0 }}>‹ Back</button>
           <h1 className="lilita" style={{ fontSize: 32, margin: "0 0 6px", lineHeight: 1.1, color: "var(--dark)" }}>Need help? 💛</h1>
           <p style={{ color: "#666", fontSize: 15, marginBottom: 16 }}>Tap what you need and your Mosaic team will follow up.</p>
