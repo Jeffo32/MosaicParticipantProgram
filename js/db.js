@@ -407,6 +407,17 @@
           .order("date", { ascending: true });
         if (r.error) throw r.error; return r.data;
       },
+      // Upcoming active bookings for ONE participant (today onward, Melbourne date).
+      participantBookings: async function (pid) {
+        var today = new Date(new Date().toLocaleString("en-US", { timeZone: "Australia/Melbourne" })).toISOString().slice(0, 10);
+        var r = await sb.from("bookings")
+          .select("id, date, status, activity_id, activities(name, emoji, color, start_block, end_block, location:notes)")
+          .eq("participant_id", pid)
+          .gte("date", today)
+          .in("status", ["pending", "confirmed"])
+          .order("date", { ascending: true });
+        if (r.error) throw r.error; return r.data;
+      },
       setBookingStatus: async function (id, status) {
         var patch = { status: status };
         if (status === "cancelled" || status === "late_cancelled") patch.cancelled_at = new Date().toISOString();

@@ -130,6 +130,20 @@
         const list = map[date]||[]; const i = list.findIndex(b => String(b.activityId)===aid);
         if (i>=0){ list[i].status = status; map[date]=list; lsSet("mosaic_bookings_v2", map);} return true;
       },
+      participantBookings: async () => {
+        const today = new Date().toISOString().slice(0,10);
+        const map = lsGet("mosaic_bookings_v2", {}); const out = [];
+        Object.keys(map).forEach(date => {
+          if (date < today) return;
+          (map[date]||[]).forEach(bk => {
+            if (bk.status!=="pending" && bk.status!=="confirmed") return;
+            const a = actById(bk.activityId) || {};
+            out.push({ id: date+"|"+bk.activityId, date, status: bk.status, activity_id: bk.activityId,
+              activities:{ name:a.name, emoji:a.emoji, color:a.color, start_block:a.start_block, end_block:a.end_block, location:a.location } });
+          });
+        });
+        return out.sort((x,y)=> x.date.localeCompare(y.date));
+      },
       assignWorker: async () => true,
       getAway: async () => lsGet("mosaic_away_v1", []).map(p => ({ id:p.id, start_date:p.start, end_date:p.end||p.start, note:p.note })),
       listAwayForWeek: async (monIso, sunIso) => lsGet("mosaic_away_v1", [])
@@ -409,11 +423,13 @@
     function ProfileView({ id, onBack, onDeleted }) {
       const [p,setP]=useState(null); const [err,setErr]=useState(""); const [away,setAway]=useState([]); const [busy,setBusy]=useState(false);
       const [workers,setWorkers]=useState([]); const [assigns,setAssigns]=useState([]); const [addW,setAddW]=useState("");
+      const [bookings,setBookings]=useState(null);
       const admin = isAdmin();
       const loadAssign = ()=> A.getAssignments(id).then(setAssigns).catch(()=>setAssigns([]));
       useEffect(()=>{
         A.getParticipant(id).then(setP).catch(e=>setErr(e.message));
         A.getAway(id).then(setAway).catch(()=>setAway([]));
+        A.participantBookings(id).then(setBookings).catch(()=>setBookings([]));
         if (admin) { A.listWorkers().then(setWorkers).catch(()=>{}); loadAssign(); }
       },[id]);
       const wname = (wid)=> (workers.find(w=>w.id===wid)||{}).display_name || "Worker";
@@ -445,6 +461,24 @@
             <h2 className="lilita" style={{ fontSize:26 }}>{p.display_name}</h2>
             <div style={{ fontSize:14, color:"#777" }}>{p.phone||"No phone"} · {p.mode||"both"}</div>
           </div>
+
+          {/* Timetable — the participant's upcoming booked activities. */}
+          <div className="card" style={{ padding:20, marginBottom:14 }}>
+            <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>Timetable · upcoming activities</div>
+            {bookings===null ? <div style={{ fontSize:14, color:"#999" }}>Loading…</div>
+             : bookings.length===0 ? <div style={{ fontSize:14, color:"#999" }}>No activities booked yet. They pick these in the participant app and tap “Save My Week”.</div>
+             : bookings.map(b=>{ const a=b.activities||{}; return (
+                <div key={b.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0", borderBottom:"1px solid #F2ECE4" }}>
+                  <div style={{ width:40, height:40, borderRadius:11, background:(a.color||"#ccc")+"22", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{a.emoji||"📅"}</div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontWeight:700, fontSize:15 }}>{a.name||"Activity"}</div>
+                    <div style={{ fontSize:12.5, color:"#777" }}>{fmtDate(b.date)} · {blockRangeLabel(a)}{a.location?` · ${a.location}`:""}</div>
+                  </div>
+                  <span style={{ fontSize:11, fontWeight:800, color: b.status==="confirmed"?"#27AE60":"#B26A00" }}>{b.status==="confirmed"?"✓ confirmed":"pending"}</span>
+                </div>
+              ); })}
+          </div>
+
           {(intake.dob || intake.contact_name || intake.funding) && (
             <div className="card" style={{ padding:20, marginBottom:14 }}>
               <div className="cap" style={{ color:"var(--flame)", marginBottom:10 }}>Mosaic records</div>
