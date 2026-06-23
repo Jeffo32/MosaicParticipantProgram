@@ -2,7 +2,7 @@
   "name": "Mosaic Elite Health",
   "short_name": "Mosaic",
   "description": "Mosaic Elite Health Community Hub — pick your weekly activities, ask for help, stay connected.",
-  "start_url": "./index.html",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",

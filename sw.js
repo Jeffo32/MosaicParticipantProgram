@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v3"; // v3: clean URLs (cleanUrls 308-redirects .html → breaks addAll + nav)
+const CACHE = "mosaic-v4"; // v4: unwrap redirected responses (PWA start_url /index.html → blank screen)
 const SHELL = [
   "./",
   "./admin",
@@ -44,19 +44,29 @@ self.addEventListener("fetch", (e) => {
 
   // Same-origin GET: cache-first, fall back to network, then to cached shell.
   e.respondWith(
-    caches.match(req).then((hit) => {
+    caches.match(req).then(async (hit) => {
       if (hit) return hit;
-      return fetch(req)
-        .then((resp) => {
-          // Don't cache redirected/opaque responses — cache.put() throws on them,
-          // and returning a redirected response to a navigation is a browser error.
-          if (resp && resp.ok && !resp.redirected) {
-            const copy = resp.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-          }
-          return resp;
-        })
-        .catch(() => caches.match("./"));
+      try {
+        const resp = await fetch(req);
+        // cleanUrls 308-redirects .html → clean paths. Handing a *redirected* response
+        // to a navigation is a browser error (blank screen), and cache.put() throws on
+        // it — so rebuild redirected responses as plain, non-redirected ones.
+        let out = resp;
+        if (resp.redirected) {
+          const body = await resp.blob();
+          const headers = new Headers(resp.headers);
+          headers.delete("content-encoding");
+          headers.delete("content-length");
+          out = new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+        }
+        if (out.ok) {
+          const copy = out.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        }
+        return out;
+      } catch {
+        return (await caches.match("./")) || Response.error();
+      }
     })
   );
 });
