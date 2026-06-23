@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v4"; // v4: unwrap redirected responses (PWA start_url /index.html → blank screen)
+const CACHE = "mosaic-v5"; // v5: pin Babel 7 (CDN drifted to v8 → app-wide blank screen)
 const SHELL = [
   "./",
   "./admin",
