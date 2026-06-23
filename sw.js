@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v5"; // v5: pin Babel 7 (CDN drifted to v8 → app-wide blank screen)
+const CACHE = "mosaic-v6"; // v6: network-first for HTML (stale cached page must never blank the app)
 const SHELL = [
   "./",
   "./admin",
@@ -33,40 +33,55 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// cleanUrls 308-redirects .html → clean paths. A *redirected* response handed to a
+// navigation is a browser error (blank screen) and cache.put() throws on it — so
+// rebuild redirected responses as plain, non-redirected ones.
+async function unredirect(resp) {
+  if (!resp.redirected) return resp;
+  const body = await resp.blob();
+  const headers = new Headers(resp.headers);
+  headers.delete("content-encoding");
+  headers.delete("content-length");
+  return new Response(body, { status: resp.status, statusText: resp.statusText, headers });
+}
+const putCache = (req, resp) => { if (resp.ok) caches.open(CACHE).then((c) => c.put(req, resp.clone())).catch(() => {}); };
+
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
 
-  // Never cache API or cross-origin (Supabase, CDNs) — always go to network.
+  // Never touch API or cross-origin (Supabase, CDNs) — always go to network.
   if (req.method !== "GET" || url.pathname.startsWith("/api/") || url.origin !== self.location.origin) {
     return;
   }
 
-  // Same-origin GET: cache-first, fall back to network, then to cached shell.
-  e.respondWith(
-    caches.match(req).then(async (hit) => {
-      if (hit) return hit;
+  const isDoc = req.mode === "navigate" || req.destination === "document";
+
+  if (isDoc) {
+    // NETWORK-FIRST for HTML — guarantees the latest page; a stale/broken cached
+    // document can never blank the app. Falls back to cache only when offline.
+    e.respondWith((async () => {
       try {
-        const resp = await fetch(req);
-        // cleanUrls 308-redirects .html → clean paths. Handing a *redirected* response
-        // to a navigation is a browser error (blank screen), and cache.put() throws on
-        // it — so rebuild redirected responses as plain, non-redirected ones.
-        let out = resp;
-        if (resp.redirected) {
-          const body = await resp.blob();
-          const headers = new Headers(resp.headers);
-          headers.delete("content-encoding");
-          headers.delete("content-length");
-          out = new Response(body, { status: resp.status, statusText: resp.statusText, headers });
-        }
-        if (out.ok) {
-          const copy = out.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
-        }
+        const out = await unredirect(await fetch(req));
+        putCache(req, out);
         return out;
       } catch {
-        return (await caches.match("./")) || Response.error();
+        return (await caches.match(req)) || (await caches.match("./")) || Response.error();
       }
-    })
-  );
+    })());
+    return;
+  }
+
+  // CACHE-FIRST for static assets (art, css, js, icons) — fast + offline.
+  e.respondWith((async () => {
+    const hit = await caches.match(req);
+    if (hit) return hit;
+    try {
+      const out = await unredirect(await fetch(req));
+      putCache(req, out);
+      return out;
+    } catch {
+      return Response.error();
+    }
+  })());
 });
