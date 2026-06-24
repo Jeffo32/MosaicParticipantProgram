@@ -825,9 +825,9 @@
       // DESKTOP / laptop — centered, contained column with a floating rounded nav bar.
       if (wide) {
         return (
-          <div style={{ minHeight:"100vh", padding:"22px 20px 72px" }}>
+          <div style={{ minHeight:"100vh", padding:"calc(22px + env(safe-area-inset-top)) 20px 72px" }}>
             <div style={{ maxWidth:1040, margin:"0 auto" }}>
-              <header style={{ position:"sticky", top:16, zIndex:50, background:"var(--gradient)", color:"#fff", borderRadius:22, display:"flex", alignItems:"center", gap:16, padding:"12px 18px", marginBottom:26, boxShadow:"var(--shadow-warm)" }}>
+              <header style={{ position:"sticky", top:"calc(16px + env(safe-area-inset-top))", zIndex:50, background:"var(--gradient)", color:"#fff", borderRadius:22, display:"flex", alignItems:"center", gap:16, padding:"12px 18px", marginBottom:26, boxShadow:"var(--shadow-warm)" }}>
                 <div style={{ lineHeight:1, paddingRight:4 }}>
                   <div className="bebas" style={{ fontSize:22 }}>MOSAIC STAFF</div>
                   <div className="cap" style={{ opacity:.85, fontSize:9 }}>{LIVE ? "Live" : "Demo mode"}</div>
@@ -853,7 +853,7 @@
       // MOBILE — bottom nav
       return (
         <div style={{ maxWidth:680, margin:"0 auto", padding:"0 0 90px" }}>
-          <div style={{ background:"var(--gradient)", color:"#fff", padding:"16px 18px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div style={{ background:"var(--gradient)", color:"#fff", padding:"calc(16px + env(safe-area-inset-top)) 18px 16px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <div>
               <div className="bebas" style={{ fontSize:24, lineHeight:.9 }}>MOSAIC STAFF</div>
               <div className="cap" style={{ opacity:.85 }}>{LIVE ? "Live" : "Demo mode"}</div>
