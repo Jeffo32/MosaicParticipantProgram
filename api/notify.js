@@ -14,6 +14,14 @@ const COPY = {
   staff_reply: () => null, // staff -> participant reply; participant push handled separately
 };
 
+// Clean copy for the push banner — the device already shows the app name ("Mosaic"),
+// so don't repeat it. Title = who/what, body = the detail.
+const PUSH = {
+  message: (p) => ({ title: p.participant || "New message", body: (p.text || "sent a message").slice(0, 140) }),
+  service_request: (p) => ({ title: `${p.participant || "A participant"} needs help`, body: `${p.type || "Help request"}${p.detail ? `: ${p.detail}` : ""}` }),
+  away: (p) => ({ title: `${p.participant || "A participant"} will be away`, body: `${p.start || ""}${p.end && p.end !== p.start ? ` → ${p.end}` : ""}${p.note ? ` (${p.note})` : ""}`.trim() }),
+};
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return res.status(200).json({ ok: true, skipped: "method" });
@@ -46,9 +54,10 @@ export default async function handler(req, res) {
         const ids = (ad.data || []).map((r) => r.id);
         if (ids.length) {
           const subs = await sb.from("push_subscriptions").select("id, endpoint, p256dh, auth").in("user_id", ids);
-          const payload = JSON.stringify({ title: "Mosaic", body: text, url: "/admin" });
+          const pc = (PUSH[kind] || (() => ({ title: "Mosaic", body: text })))(payload);
+          const pushData = JSON.stringify({ title: pc.title, body: pc.body, url: "/admin" });
           results.push = await Promise.all((subs.data || []).map((s) =>
-            webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload)
+            webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, pushData)
               .then(() => ({ ok: true }))
               .catch(async (err) => {
                 // Prune dead subscriptions so the table stays clean.
