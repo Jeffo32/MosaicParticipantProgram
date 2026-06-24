@@ -7,6 +7,13 @@
   <meta name="theme-color" content="#1A0A00" />
   <link rel="icon" type="image/png" href="icons/favicon-32.png" />
 
+  <!-- Installable as its own app so iOS (16.4+) can receive push alerts. -->
+  <link rel="manifest" href="admin.webmanifest" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Mosaic Staff" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <!-- Pinned to Babel 7: v8 defaults JSX to the automatic runtime (emits `import
@@ -165,6 +172,56 @@
     const A = LIVE ? DB.admin : LocalAdmin;
     const myRole = () => (LIVE && DB.auth.session ? DB.auth.session.role : "admin");
     const isAdmin = () => ["admin", "manager"].includes(myRole());
+
+    // ── Web Push (admin message alerts) ──────────────────────
+    const VAPID_PUBLIC = "BDJB6ukpnuC0vqyZC_KfVpjNpVPjXidqyCJS_LOepkqF3V93Y3t7D-Goi-VPrcKxW0lwreLTtYdFnIrQWWreToM";
+    function urlB64ToUint8Array(b64) {
+      const pad = "=".repeat((4 - (b64.length % 4)) % 4);
+      const s = (b64 + pad).replace(/-/g, "+").replace(/_/g, "/");
+      const raw = atob(s); const out = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+      return out;
+    }
+    const pushSupported = () => ("serviceWorker" in navigator) && ("PushManager" in window) && ("Notification" in window);
+    async function enablePush() {
+      if (!pushSupported()) throw new Error("This device can't do push alerts. On iPhone, add the dashboard to your Home Screen first (Share → Add to Home Screen), then open it from there and try again.");
+      const reg = await navigator.serviceWorker.register("sw.js");
+      await navigator.serviceWorker.ready;
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") throw new Error("Notifications weren't allowed. Turn them on in your browser/site settings, then try again.");
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8Array(VAPID_PUBLIC) });
+      const j = sub.toJSON();
+      await DB.admin.savePushSubscription({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth });
+      return true;
+    }
+    async function pushAlready() {
+      try {
+        if (!pushSupported() || Notification.permission !== "granted") return false;
+        const reg = await navigator.serviceWorker.getRegistration();
+        return !!(reg && await reg.pushManager.getSubscription());
+      } catch { return false; }
+    }
+    function AlertsButton({ mobile }) {
+      const [on, setOn] = useState(false);
+      const [busy, setBusy] = useState(false);
+      useEffect(() => { pushAlready().then(setOn); }, []);
+      if (!LIVE || !pushSupported()) return null;
+      const click = async () => {
+        setBusy(true);
+        try { await enablePush(); setOn(true); }
+        catch (e) { alert(e.message || "Couldn't enable alerts."); }
+        finally { setBusy(false); }
+      };
+      const r = mobile ? 10 : 14, px = mobile ? 12 : 14;
+      return (
+        <button onClick={on ? undefined : click} disabled={busy}
+          title="Get a push alert when a participant sends a message"
+          style={{ background: on ? "rgba(255,255,255,.30)" : "rgba(255,255,255,.14)", color:"#fff", border:"none", borderRadius:r, padding:`9px ${px}px`, fontWeight:700, fontSize:13, cursor: on ? "default" : "pointer" }}>
+          {busy ? "…" : on ? "🔔 Alerts on" : "🔔 Enable alerts"}
+        </button>
+      );
+    }
 
     // ============================================================
     // STAFF LOGIN (live only)
@@ -782,6 +839,7 @@
                     </button>
                   ))}
                 </nav>
+                <AlertsButton/>
                 {LIVE && <button onClick={()=>setChpw(true)} style={{ background:"rgba(255,255,255,.14)", color:"#fff", border:"none", borderRadius:14, padding:"9px 14px", fontWeight:700, fontSize:13, cursor:"pointer" }}>Password</button>}
                 <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:14, padding:"9px 16px", fontWeight:700, fontSize:13, cursor:"pointer" }}>{LIVE?"Log out":"Exit"}</button>
               </header>
@@ -801,6 +859,7 @@
               <div className="cap" style={{ opacity:.85 }}>{LIVE ? "Live" : "Demo mode"}</div>
             </div>
             <div style={{ display:"flex", gap:8 }}>
+              <AlertsButton mobile/>
               {LIVE && <button onClick={()=>setChpw(true)} style={{ background:"rgba(255,255,255,.14)", color:"#fff", border:"none", borderRadius:10, padding:"8px 12px", fontWeight:700, fontSize:13 }}>Password</button>}
               <button onClick={onLogout} style={{ background:"rgba(255,255,255,.2)", color:"#fff", border:"none", borderRadius:10, padding:"8px 14px", fontWeight:700, fontSize:13 }}>{LIVE?"Log out":"Exit"}</button>
             </div>

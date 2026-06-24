@@ -478,6 +478,19 @@
         return true;
       },
 
+      // Store this device's Web Push subscription so the server can alert this staff member.
+      savePushSubscription: async function (sub) {
+        var token = (await sb.auth.getSession()).data.session.access_token;
+        var resp = await fetch("/api/save-push-sub", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": "Bearer " + token },
+          body: JSON.stringify(sub),
+        });
+        var body = await resp.json().catch(function () { return {}; });
+        if (!resp.ok) throw new Error(body.error || "Could not enable alerts.");
+        return true;
+      },
+
       getAway: async function (participantId) {
         var r = await sb.from("away_periods").select("id, start_date, end_date, note").eq("participant_id", participantId).order("start_date");
         if (r.error) throw r.error; return r.data;

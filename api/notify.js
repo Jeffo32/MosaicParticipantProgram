@@ -5,6 +5,7 @@
 // primary, always-on channel; SMS/email here is an extra.
 import { admin, logNotification } from "./_supabase.js";
 import { sendSms, sendEmail, smsConfigured, emailConfigured } from "./_send.js";
+import webpush from "web-push";
 
 const COPY = {
   service_request: (p) => `Mosaic: ${p.participant || "A participant"} needs help — "${p.type}"${p.detail ? `: ${p.detail}` : ""}. Open the dashboard.`,
@@ -30,6 +31,35 @@ export default async function handler(req, res) {
     }
     if (emailConfigured()) {
       results.email = await sendEmail("Mosaic — action needed", `<p>${text}</p>`).catch((e) => ({ error: e.message }));
+    }
+
+    // Web push to every admin/manager — the "never missed" channel.
+    if (process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+      try {
+        webpush.setVapidDetails(
+          process.env.VAPID_SUBJECT || "mailto:jeffo.productions@gmail.com",
+          process.env.VAPID_PUBLIC_KEY,
+          process.env.VAPID_PRIVATE_KEY
+        );
+        const sb = admin();
+        const ad = await sb.from("profiles").select("id").in("role", ["admin", "manager"]);
+        const ids = (ad.data || []).map((r) => r.id);
+        if (ids.length) {
+          const subs = await sb.from("push_subscriptions").select("id, endpoint, p256dh, auth").in("user_id", ids);
+          const payload = JSON.stringify({ title: "Mosaic", body: text, url: "/admin" });
+          results.push = await Promise.all((subs.data || []).map((s) =>
+            webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload)
+              .then(() => ({ ok: true }))
+              .catch(async (err) => {
+                // Prune dead subscriptions so the table stays clean.
+                if (err.statusCode === 404 || err.statusCode === 410) {
+                  try { await sb.from("push_subscriptions").delete().eq("id", s.id); } catch {}
+                }
+                return { error: err.statusCode || err.message };
+              })
+          ));
+        }
+      } catch (e) { results.pushError = e.message; }
     }
 
     try { await logNotification(admin(), "staff_notify", { kind, text, results }, "sent"); } catch {}

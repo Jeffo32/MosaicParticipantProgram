@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v6"; // v6: network-first for HTML (stale cached page must never blank the app)
+const CACHE = "mosaic-v7"; // v7: web-push handlers for admin message alerts
 const SHELL = [
   "./",
   "./admin",
@@ -84,4 +84,28 @@ self.addEventListener("fetch", (e) => {
       return Response.error();
     }
   })());
+});
+
+// ── Web Push: show the alert, and focus/open the dashboard on tap ──
+self.addEventListener("push", (e) => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch { data = { body: e.data && e.data.text() }; }
+  const title = data.title || "Mosaic";
+  e.waitUntil(self.registration.showNotification(title, {
+    body: data.body || "New message from a participant",
+    icon: "./icons/icon-192.png",
+    badge: "./icons/icon-192.png",
+    tag: data.tag || "mosaic-notify",
+    renotify: true,
+    data: { url: data.url || "./admin" },
+  }));
+});
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || "./admin";
+  e.waitUntil(self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((cl) => {
+    for (const c of cl) { if (c.url.includes("/admin") && "focus" in c) return c.focus(); }
+    return self.clients.openWindow ? self.clients.openWindow(url) : null;
+  }));
 });

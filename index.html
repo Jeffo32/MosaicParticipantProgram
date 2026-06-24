@@ -1662,6 +1662,120 @@
       return Object.values(b).some(list => list.some(x => x.status === "pending" || x.status === "confirmed"));
     }
 
+    // ── MosaicGate — shared opening splash + staff PIN pad ───────────────
+    // SAME component as in mosaic-os and mosaic-reports. Palette + markup are
+    // hardcoded so the opening experience is pixel-identical across all three
+    // Mosaic apps. Keep the three copies in sync. Auth is MOCKED: verifyStaffPin
+    // checks a shared demo code so one staff code works on every app. Swap its
+    // body for the real backend (verify_staff_pin RPC → session) later.
+    const MG_C = { deep:"#44175E", purple:"#6B2C91", light:"#8E3FB8", green:"#8CC63F" };
+    const MG_PIN_LENGTH = 4;
+    const DEMO_STAFF_CODE = "4729"; // one code, all three apps
+    async function verifyStaffPin(code) {
+      await new Promise(r => setTimeout(r, 350));
+      return code === DEMO_STAFF_CODE;
+    }
+    const MG_TILES = [MG_C.light,MG_C.purple,MG_C.green, MG_C.purple,MG_C.green,MG_C.light, MG_C.green,MG_C.light,MG_C.purple];
+    const MG_GATE_KEY = "mosaic_gate_unlocked";
+
+    function MosaicGate({ children, appName = "Mosaic", onVerify = verifyStaffPin }) {
+      const already = (() => { try { return sessionStorage.getItem(MG_GATE_KEY) === "1"; } catch { return false; } })();
+      const [phase, setPhase] = useState(already ? "done" : "splash"); // splash | pin | done
+      const [digits, setDigits] = useState("");
+      const [busy, setBusy] = useState(false);
+      const [shake, setShake] = useState(false);
+      const [ok, setOk] = useState(false);
+      const submitting = React.useRef(false);
+
+      useEffect(() => {
+        if (phase !== "splash") return;
+        const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        const t = setTimeout(() => setPhase("pin"), reduce ? 400 : 1900);
+        return () => clearTimeout(t);
+      }, [phase]);
+
+      const unlock = () => { try { sessionStorage.setItem(MG_GATE_KEY, "1"); } catch {} setPhase("done"); };
+      const submit = async (code) => {
+        if (submitting.current) return;
+        submitting.current = true; setBusy(true);
+        try {
+          if (await onVerify(code)) { setOk(true); setTimeout(unlock, 450); }
+          else { setShake(true); setTimeout(() => { setShake(false); setDigits(""); }, 420); }
+        } catch { setShake(true); setTimeout(() => { setShake(false); setDigits(""); }, 420); }
+        finally { setBusy(false); submitting.current = false; }
+      };
+      const press = (n) => {
+        if (busy || digits.length >= MG_PIN_LENGTH) return;
+        const next = digits + String(n); setDigits(next);
+        if (next.length === MG_PIN_LENGTH) submit(next);
+      };
+      const back = () => { if (!busy) setDigits(d => d.slice(0, -1)); };
+
+      if (phase === "done") return children;
+
+      const S = MG_STYLES;
+      const Key = ({ children, onClick, label }) => (
+        <button type="button" className="mg-key" onClick={onClick} disabled={busy} aria-label={label} style={S.key}>{children}</button>
+      );
+
+      return (
+        <div style={S.root}>
+          <style>{MG_CSS}</style>
+          {phase === "splash" ? (
+            <div className="mg-splash" style={S.center}>
+              <div style={S.tileGrid}>
+                {MG_TILES.map((c, i) => <span key={i} className="mg-tile" style={{ background: c, animationDelay: (i*70)+"ms" }} />)}
+              </div>
+              <div className="mg-word" style={S.wordmark}>MOSAIC</div>
+              <div className="mg-word" style={{ ...S.subWord, animationDelay: "320ms" }}>{appName}</div>
+            </div>
+          ) : (
+            <div className="mg-pin" style={S.center}>
+              <div style={S.miniGrid}>{MG_TILES.map((c, i) => <span key={i} style={{ ...S.miniTile, background: c }} />)}</div>
+              <div style={S.pinTitle}>{ok ? "Welcome" : "Enter your staff code"}</div>
+              <div style={S.pinSub}>{appName}</div>
+              <div className={shake ? "mg-shake" : ""} style={S.dots}>
+                {Array.from({ length: MG_PIN_LENGTH }).map((_, i) => {
+                  const filled = i < digits.length;
+                  return <span key={i} style={{ ...S.dot, background: ok ? MG_C.green : filled ? "#fff" : "transparent", borderColor: ok ? MG_C.green : "rgba(255,255,255,0.55)", transform: filled ? "scale(1.12)" : "scale(1)" }} />;
+                })}
+              </div>
+              <div style={S.keypad}>
+                {[1,2,3,4,5,6,7,8,9].map(n => <Key key={n} onClick={() => press(n)}>{n}</Key>)}
+                <span />
+                <Key onClick={() => press(0)}>0</Key>
+                <Key onClick={back} label="Delete">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M9.5 5.5h9A1.5 1.5 0 0 1 20 7v10a1.5 1.5 0 0 1-1.5 1.5h-9a1.5 1.5 0 0 1-1.18-.57l-4-5a1.5 1.5 0 0 1 0-1.86l4-5A1.5 1.5 0 0 1 9.5 5.5Z" stroke="#fff" strokeWidth="1.6" strokeLinejoin="round" />
+                    <path d="M16 10l-4 4m0-4l4 4" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+                  </svg>
+                </Key>
+              </div>
+              <button type="button" style={S.bypass} onClick={unlock}>Sign in another way</button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const MG_STYLES = {
+      root: { position:"fixed", inset:0, zIndex:9999, background:"radial-gradient(120% 90% at 50% -10%, "+MG_C.light+" 0%, "+MG_C.purple+" 38%, "+MG_C.deep+" 100%)", fontFamily:'"Lexend", system-ui, -apple-system, "Segoe UI", sans-serif', color:"#fff", display:"flex", alignItems:"center", justifyContent:"center", padding:24, boxSizing:"border-box", WebkitTapHighlightColor:"transparent", userSelect:"none" },
+      center: { display:"flex", flexDirection:"column", alignItems:"center" },
+      tileGrid: { display:"grid", gridTemplateColumns:"repeat(3, 30px)", gap:7, marginBottom:28 },
+      wordmark: { fontSize:46, fontWeight:700, letterSpacing:"0.22em", paddingLeft:"0.22em", lineHeight:1 },
+      subWord: { marginTop:12, fontSize:12, fontWeight:500, letterSpacing:"0.34em", paddingLeft:"0.34em", textTransform:"uppercase", color:"rgba(255,255,255,0.7)" },
+      miniGrid: { display:"grid", gridTemplateColumns:"repeat(3, 12px)", gap:4, marginBottom:22 },
+      miniTile: { width:12, height:12, borderRadius:3, opacity:0.95 },
+      pinTitle: { fontSize:20, fontWeight:600, letterSpacing:"0.01em" },
+      pinSub: { marginTop:4, fontSize:11, fontWeight:500, letterSpacing:"0.28em", textTransform:"uppercase", color:"rgba(255,255,255,0.6)" },
+      dots: { display:"flex", gap:18, margin:"30px 0 34px" },
+      dot: { width:15, height:15, borderRadius:"50%", border:"2px solid", transition:"transform .12s ease, background .12s ease" },
+      keypad: { display:"grid", gridTemplateColumns:"repeat(3, 76px)", gap:16, justifyContent:"center" },
+      key: { width:76, height:76, borderRadius:"50%", border:"1px solid rgba(255,255,255,0.22)", background:"rgba(255,255,255,0.08)", color:"#fff", fontSize:30, fontWeight:500, fontVariantNumeric:"tabular-nums", display:"flex", alignItems:"center", justifyContent:"center", cursor:"pointer", WebkitTapHighlightColor:"transparent", transition:"transform .08s ease, background .15s ease" },
+      bypass: { marginTop:34, background:"transparent", border:"none", color:"rgba(255,255,255,0.65)", fontSize:13, letterSpacing:"0.02em", textDecoration:"underline", textUnderlineOffset:3, cursor:"pointer", fontFamily:"inherit" },
+    };
+    const MG_CSS = "@keyframes mgTileIn{0%{opacity:0;transform:scale(.4) translateY(10px)}60%{opacity:1}100%{opacity:1;transform:scale(1) translateY(0)}}@keyframes mgFadeUp{0%{opacity:0;transform:translateY(14px)}100%{opacity:1;transform:translateY(0)}}@keyframes mgShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-7px)}40%{transform:translateX(7px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}.mg-tile{width:30px;height:30px;border-radius:7px;opacity:0;animation:mgTileIn .5s cubic-bezier(.2,.9,.3,1) forwards}.mg-word{opacity:0;animation:mgFadeUp .55s ease forwards;animation-delay:240ms}.mg-shake{animation:mgShake .42s ease}.mg-pin,.mg-splash{animation:mgFadeUp .4s ease}.mg-key:active{transform:scale(.92);background:rgba(255,255,255,0.2)!important}.mg-key:disabled{opacity:.5;cursor:default}@media (prefers-reduced-motion: reduce){.mg-tile,.mg-word,.mg-pin,.mg-splash{animation:none!important;opacity:1!important;transform:none!important}}";
+
     function App() {
       const [boot, setBoot] = useState("loading"); // loading | ready
       const [session, setSessionState] = useState(() => (DB && DB.auth.session) || null);
@@ -1725,7 +1839,7 @@
     }
 
     const root = ReactDOM.createRoot(document.getElementById("root"));
-    root.render(<App />);
+    root.render(<MosaicGate appName="Participant"><App /></MosaicGate>);
 
     // PWA: register the service worker for offline + home-screen install.
     if ("serviceWorker" in navigator) {
