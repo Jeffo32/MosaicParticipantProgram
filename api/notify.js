@@ -34,6 +34,29 @@ export default async function handler(req, res) {
     if (!text) return res.status(200).json({ ok: true, skipped: "no-copy" });
 
     const results = {};
+
+    // After-hours auto-reply: a participant messaging outside 9am–5pm (Mon–Fri,
+    // Melbourne) gets a friendly automatic reply, at most once per 12h, so they're
+    // never left hanging. Inserted server-side as a staff message → shows in their chat.
+    if (kind === "message" && payload.participantId) {
+      try {
+        const sb = admin();
+        const mel = new Date(new Date().toLocaleString("en-US", { timeZone: "Australia/Melbourne" }));
+        const h = mel.getHours(), d = mel.getDay(); // d: 0 Sun … 6 Sat
+        if (h < 9 || h >= 17 || d === 0 || d === 6) {
+          const AUTO = "Thanks for your message! 💛 Our team is here 9am–5pm, Monday to Friday. We'll get back to you as soon as we're back.";
+          const since = new Date(Date.now() - 12 * 3600 * 1000).toISOString();
+          const prior = await sb.from("messages").select("id")
+            .eq("participant_id", payload.participantId).eq("sender", "staff").eq("body", AUTO)
+            .gte("created_at", since).limit(1);
+          if (!prior.data || prior.data.length === 0) {
+            await sb.from("messages").insert({ participant_id: payload.participantId, sender: "staff", body: AUTO });
+            results.autoReply = "sent";
+          } else { results.autoReply = "skipped-recent"; }
+        }
+      } catch (e) { results.autoReplyError = e.message; }
+    }
+
     if (smsConfigured() && process.env.STAFF_NOTIFY_PHONE) {
       results.sms = await sendSms(process.env.STAFF_NOTIFY_PHONE, text).catch((e) => ({ error: e.message }));
     }

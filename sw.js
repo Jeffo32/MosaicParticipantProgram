@@ -1,6 +1,6 @@
 // Mosaic service worker — offline-capable app shell.
 // Bump CACHE when you change cached files.
-const CACHE = "mosaic-v7"; // v7: web-push handlers for admin message alerts
+const CACHE = "mosaic-v8"; // v8: read receipts in js/db.js (bust the cached data layer)
 const SHELL = [
   "./",
   "./admin",

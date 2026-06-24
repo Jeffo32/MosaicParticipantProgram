@@ -326,16 +326,21 @@
     // ---------- PARTICIPANT: messages ----------
     listMessages: async function () {
       if (!ENABLED || !session || session.role !== "participant") return null;
-      var r = await sb.from("messages").select("id,sender,body,created_at").eq("participant_id", session.id).order("created_at", { ascending: true });
+      var r = await sb.from("messages").select("id,sender,body,created_at,read_at").eq("participant_id", session.id).order("created_at", { ascending: true });
       if (r.error) { console.warn("[MosaicDB] listMessages", r.error); return null; }
-      return r.data.map(function (m) { return { id: m.id, from: m.sender === "participant" ? "me" : "them", at: m.created_at, text: m.body }; });
+      return r.data.map(function (m) { return { id: m.id, from: m.sender === "participant" ? "me" : "them", at: m.created_at, text: m.body, read_at: m.read_at }; });
+    },
+    // Participant marks the staff's messages as read (powers staff-side receipts).
+    markMessagesRead: async function () {
+      if (!ENABLED || !session || session.role !== "participant") return;
+      try { await sb.from("messages").update({ read_at: new Date().toISOString() }).eq("participant_id", session.id).eq("sender", "staff").is("read_at", null); } catch (e) {}
     },
     sendMessage: async function (text) {
       if (!ENABLED || !session) return { ok: true, demo: true };
       try {
         var ins = await sb.from("messages").insert({ participant_id: session.id, sender: "participant", body: text }).select().single();
         if (ins.error) throw ins.error;
-        _notify("message", { participant: session.name, text: text });
+        _notify("message", { participant: session.name, participantId: session.id, text: text });
         return { ok: true, id: ins.data.id };
       } catch (e) { return { ok: false, error: e.message }; }
     },
@@ -503,7 +508,7 @@
       },
 
       listMessages: async function (participantId) {
-        var r = await sb.from("messages").select("id, sender, body, created_at").eq("participant_id", participantId).order("created_at");
+        var r = await sb.from("messages").select("id, sender, body, created_at, read_at").eq("participant_id", participantId).order("created_at");
         if (r.error) throw r.error; return r.data;
       },
       replyMessage: async function (participantId, text) {
@@ -511,6 +516,10 @@
         if (r.error) throw r.error;
         _notify("staff_reply", { participantId: participantId, text: text });
         return r.data;
+      },
+      // Staff marks this participant's messages as read (powers participant-side receipts).
+      markThreadRead: async function (participantId) {
+        try { await sb.from("messages").update({ read_at: new Date().toISOString() }).eq("participant_id", participantId).eq("sender", "participant").is("read_at", null); } catch (e) {}
       },
     },
   };
@@ -575,6 +584,7 @@
     createServiceRequest: data.createServiceRequest,
     away: { list: data.listAway, add: data.addAway, remove: data.removeAway },
     listMessages: data.listMessages,
+    markMessagesRead: data.markMessagesRead,
     sendMessage: data.sendMessage,
     deleteMessage: data.deleteMessage,
     admin: data.admin,

@@ -1054,6 +1054,7 @@
         const refresh = async () => {
           const m = await DB.listMessages();
           if (alive && m) setMessages(m.length ? m : seedChat());
+          if (DB.markMessagesRead) DB.markMessagesRead(); // viewing = staff messages read
         };
         refresh();
         const t = setInterval(refresh, 6000);
@@ -1148,6 +1149,11 @@
                   {showTime && (
                     <div style={{ fontSize: 10, color: "#999", margin: "4px 8px 2px", fontWeight: 600 }}>
                       {fmtTime(msg.at)}
+                    </div>
+                  )}
+                  {mine && i === messages.length - 1 && (
+                    <div style={{ fontSize: 10, color: msg.read_at ? "var(--deep-red)" : "#bbb", margin: "1px 8px 2px", fontWeight: 700 }}>
+                      {msg.read_at ? "Read ✓✓" : "Sent ✓"}
                     </div>
                   )}
                   {mine && msg.id === undoId && (

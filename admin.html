@@ -167,6 +167,7 @@
       replyMessage: async (pid, text) => {
         const c = lsGet("mosaic_chat_v1", []) || []; c.push({ id:Date.now(), from:"them", at:new Date().toISOString(), text }); lsSet("mosaic_chat_v1", c); return true;
       },
+      markThreadRead: async () => true,
     };
 
     const A = LIVE ? DB.admin : LocalAdmin;
@@ -737,7 +738,7 @@
       const [people,setPeople]=useState(null); const [pid,setPid]=useState(null);
       const [msgs,setMsgs]=useState(null); const [draft,setDraft]=useState("");
       useEffect(()=>{ A.listParticipants().then(ps=>{ setPeople(ps); if(ps.length===1) setPid(ps[0].id); }).catch(()=>{}); },[]);
-      const load = useCallback(async ()=>{ if(!pid) return; try{ setMsgs(await A.listMessages(pid)); }catch(e){} },[pid]);
+      const load = useCallback(async ()=>{ if(!pid) return; try{ setMsgs(await A.listMessages(pid)); if(A.markThreadRead) A.markThreadRead(pid); }catch(e){} },[pid]);
       useEffect(()=>{ load(); const t=setInterval(load,6000); return ()=>clearInterval(t); },[load]);
       const send = async ()=>{ const t=draft.trim(); if(!t||!pid) return; setDraft(""); await A.replyMessage(pid,t); load(); };
 
@@ -755,12 +756,12 @@
 
       const messagesEl = (
         <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14, maxHeight: wide?"62vh":"50vh", overflowY:"auto" }}>
-          {msgs===null ? <Loading/> : msgs.length===0 ? <Empty>No messages yet.</Empty> : msgs.map(m=>{
+          {msgs===null ? <Loading/> : msgs.length===0 ? <Empty>No messages yet.</Empty> : msgs.map((m,i)=>{
             const staff = m.sender==="staff";
             return (
               <div key={m.id} style={{ alignSelf: staff?"flex-end":"flex-start", maxWidth:"80%" }}>
                 <div style={{ background: staff?"var(--deep-red)":"#fff", color: staff?"#fff":"#222", border: staff?"none":"1px solid var(--line)", borderRadius:14, padding:"10px 14px", fontSize:15 }}>{m.body}</div>
-                <div style={{ fontSize:10, color:"#aaa", margin:"2px 6px", textAlign: staff?"right":"left" }}>{fmtDT(m.created_at)}</div>
+                <div style={{ fontSize:10, color:"#aaa", margin:"2px 6px", textAlign: staff?"right":"left" }}>{fmtDT(m.created_at)}{staff && i===msgs.length-1 ? (m.read_at?" · Read ✓✓":" · Sent ✓") : ""}</div>
               </div>
             );
           })}
